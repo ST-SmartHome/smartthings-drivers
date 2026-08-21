@@ -1,0 +1,7 @@
+name: bigassfans-i6-lan
+packageKey: bigassfans-i6-lan
+author: BenM
+description: Big Ass Fans Haiku H/I Series ceiling fan via local i6 protocol (SLIP-framed protobuf over TCP)
+permissions:
+  lan: {}
+  discovery: {}

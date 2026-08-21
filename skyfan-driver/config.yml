@@ -1,0 +1,7 @@
+name: skyfan-tuya-lan
+packageKey: skyfan-tuya-lan
+author: BenM
+description: Ventair Skyfan DC ceiling fan via local Tuya LAN protocol
+permissions:
+  lan: {}
+  discovery: {}
