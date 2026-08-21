@@ -1,0 +1,94 @@
+name: skyfan-dc-no-addfan.v1
+components:
+  - id: main
+    label: "Fan"
+    capabilities:
+      - id: switch
+        version: 1
+      - id: fanSpeed
+        version: 1
+      - id: refresh
+        version: 1
+      - id: aboutisland47519.skyfanMode
+        version: 1
+      - id: aboutisland47519.skyfanDirection
+        version: 1
+      - id: aboutisland47519.skyfanSleepTimer
+        version: 1
+    categories:
+      - name: Fan
+  - id: light
+    label: "Light"
+    capabilities:
+      - id: switch
+        version: 1
+      - id: switchLevel
+        version: 1
+      - id: aboutisland47519.skyfanColorTemp
+        version: 1
+    categories:
+      - name: Light
+preferences:
+  - title: "Fan IP Address"
+    name: ipAddress
+    description: "Local LAN IP of the Skyfan's WiFi module, e.g. 192.168.1.100"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      minLength: 7
+      maxLength: 15
+      default: "192.168.1.100"
+  - title: "Local Key"
+    name: localKey
+    description: "16-character local_key from the Tuya IoT Platform device details — REQUIRED, must be changed from this placeholder"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      minLength: 16
+      maxLength: 16
+      default: "0000000000000000"
+  - title: "Device ID"
+    name: deviceId
+    description: "Tuya device ID / virtual ID — REQUIRED, must be changed from this placeholder"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      minLength: 20
+      maxLength: 25
+      default: "00000000000000000000"
+  - title: "Tuya Protocol Version"
+    name: protocolVersion
+    description: "Try 3.3 first; switch to 3.4 if the fan never responds"
+    required: true
+    preferenceType: enumeration
+    definition:
+      options:
+        v33: "3.3"
+        v34: "3.4"
+      default: "v33"
+  - title: "Poll Interval (seconds)"
+    name: pollInterval
+    description: "How often to query the fan's status over the local connection"
+    required: true
+    preferenceType: integer
+    definition:
+      minimum: 10
+      maximum: 3600
+      default: 30
+  - title: "No Physical Light"
+    name: noLight
+    description: "Enable if this specific unit is a 'no light' Skyfan variant — removes the Light tile instead of showing dead controls"
+    required: false
+    preferenceType: boolean
+    definition:
+      default: false
+  - title: "Hide 'Add Another Fan' Button"
+    name: hideAddFan
+    description: "Enable to remove the 'Add another fan' button from this device's screen — useful once you've already added every fan you have"
+    required: false
+    preferenceType: boolean
+    definition:
+      default: false

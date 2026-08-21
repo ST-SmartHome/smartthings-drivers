@@ -1,0 +1,61 @@
+name: bigassfans-h-no-addfan.v1
+components:
+  - id: main
+    label: "Fan"
+    capabilities:
+      - id: switch
+        version: 1
+      - id: fanSpeed
+        version: 1
+        config:
+          values:
+            - key: "fanSpeed.value"
+              range: [0, 7]
+      - id: refresh
+        version: 1
+      - id: aboutisland47519.fanMode
+        version: 1
+      - id: aboutisland47519.fanDirection
+        version: 1
+      - id: aboutisland47519.whoosh
+        version: 1
+      - id: aboutisland47519.ecoMode
+        version: 1
+    categories:
+      - name: Fan
+  - id: light
+    label: "Light"
+    capabilities:
+      - id: switch
+        version: 1
+      - id: switchLevel
+        version: 1
+    categories:
+      - name: Light
+preferences:
+  - title: "Manual IP Override"
+    name: ipAddress
+    description: "Leave as 0.0.0.0 to use automatic mDNS discovery (the normal case). Only set a real IP here if this fan isn't being found automatically."
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      minLength: 7
+      maxLength: 15
+      default: "0.0.0.0"
+  - title: "Poll Interval (seconds)"
+    name: pollInterval
+    description: "How often to query the fan's status over the local connection"
+    required: true
+    preferenceType: integer
+    definition:
+      minimum: 10
+      maximum: 3600
+      default: 30
+  - title: "Hide 'Add Another Fan' Button"
+    name: hideAddFan
+    description: "Enable to remove the 'Add another fan' button from this device's screen — useful once every fan you have has been auto-discovered"
+    required: false
+    preferenceType: boolean
+    definition:
+      default: true

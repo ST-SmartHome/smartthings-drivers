@@ -1,0 +1,63 @@
+name: solaredge-inverter.v4
+components:
+  - id: main
+    capabilities:
+      - id: powerMeter
+        version: 1
+      - id: energyMeter
+        version: 1
+      - id: temperatureMeasurement
+        version: 1
+      - id: aboutisland47519.inverterStatus
+        version: 1
+      - id: refresh
+        version: 1
+    categories:
+      - name: SolarPanel
+  - id: grid
+    label: "Grid"
+    capabilities:
+      - id: powerMeter
+        version: 1
+      - id: aboutisland47519.gridEnergy
+        version: 1
+    categories:
+      - name: SolarPanel
+preferences:
+  - title: "Inverter IP Address"
+    name: ipAddress
+    description: "Local LAN IP of the SolarEdge inverter, e.g. 192.168.1.100"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      minLength: 7
+      maxLength: 15
+      default: "192.168.1.100"
+  - title: "Modbus TCP Port"
+    name: modbusPort
+    description: "Default is 502 on most SolarEdge units, but 1502 on some models/firmware"
+    required: true
+    preferenceType: integer
+    definition:
+      minimum: 1
+      maximum: 65535
+      default: 1502
+  - title: "Modbus Unit ID"
+    name: unitId
+    description: "SolarEdge default device ID for the Ethernet-connected inverter is 1"
+    required: true
+    preferenceType: integer
+    definition:
+      minimum: 1
+      maximum: 247
+      default: 1
+  - title: "Poll Interval (seconds)"
+    name: pollInterval
+    description: "How often to read the inverter over Modbus TCP"
+    required: true
+    preferenceType: integer
+    definition:
+      minimum: 10
+      maximum: 3600
+      default: 30
