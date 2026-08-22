@@ -128,21 +128,42 @@ end
 -- the reason to skip a switch — a persisted skip-guard silently blocked
 -- all future retries forever after one failed switch attempt on
 -- skyfan-driver, found and fixed 2026-08-21, not repeated here.
+-- 2026-08-22: extended from 2 profiles to a 4-profile (light x add-fan)
+-- matrix, same reasoning as skyfan-driver's equivalent — some Haiku units
+-- don't have the light kit fitted. The two pre-existing profile names are
+-- unchanged so no already-deployed device moves unless its preferences
+-- actually change.
 local WITH_ADDFAN_PROFILE = "bigassfans-h.v1"
 local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v1"
+local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v1"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v1"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
 local WITH_ADDFAN_PROFILE_ID = "5390ffa7-7abe-377e-a528-4cc7ee7eef93"
 local NO_ADDFAN_PROFILE_ID = "ea2c24ce-41e8-3fbc-8e24-844af1f928ad"
+-- 2026-08-22: the two new no-light profile UUIDs aren't known yet — these
+-- profiles didn't exist until this deploy. Fill in from a live device
+-- query after deploying (toggle noLight on a real device, redeploy, read
+-- device.profile.id via the REST API). A nil target_id here is safe —
+-- ensure_correct_profile always attempts a switch when it doesn't match,
+-- which is harmless while no device is on either new profile yet.
+local NO_LIGHT_PROFILE_ID = nil
+local NO_LIGHT_NO_ADDFAN_PROFILE_ID = nil
 
 local PROFILE_TO_ID = {
   [WITH_ADDFAN_PROFILE] = WITH_ADDFAN_PROFILE_ID,
   [NO_ADDFAN_PROFILE] = NO_ADDFAN_PROFILE_ID,
+  [NO_LIGHT_PROFILE] = NO_LIGHT_PROFILE_ID,
+  [NO_LIGHT_NO_ADDFAN_PROFILE] = NO_LIGHT_NO_ADDFAN_PROFILE_ID,
 }
 
 local function profile_for(device)
   local prefs = device.preferences or {}
-  if prefs.hideAddFan then
+  if prefs.noLight and prefs.hideAddFan then
+    return NO_LIGHT_NO_ADDFAN_PROFILE
+  elseif prefs.noLight then
+    return NO_LIGHT_PROFILE
+  elseif prefs.hideAddFan then
     return NO_ADDFAN_PROFILE
   end
   return WITH_ADDFAN_PROFILE
