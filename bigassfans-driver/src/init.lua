@@ -71,9 +71,20 @@ local function poll_once(driver, device)
     -- Both categories over one shared connection, not two separate
     -- connect/close cycles — see BafClient.query_multi for why (2026-08-13
     -- connection-churn/light-blip finding).
+    --
+    -- One immediate retry on failure: on a sufficiently lossy Wi-Fi link,
+    -- poll_once can fail with "read failed waiting for start delimiter:
+    -- timeout" — a lost/delayed response, not a slow one, so a longer
+    -- timeout wouldn't help; a fresh attempt is what actually has a
+    -- chance of landing. Not tested against a controlled packet-loss
+    -- rig, just live poll cycles — revisit if misses persist after this.
     local results, err = BafClient.query_multi(ip, { "FAN", "LIGHT" }, 5)
     if not results then
-      log.error("BAF poll query failed for " .. ip .. ": " .. tostring(err))
+      log.warn("BAF poll query failed for " .. ip .. " (retrying once): " .. tostring(err))
+      results, err = BafClient.query_multi(ip, { "FAN", "LIGHT" }, 5)
+    end
+    if not results then
+      log.error("BAF poll query failed for " .. ip .. " after retry: " .. tostring(err))
       return
     end
     apply_fan_status(device, results.FAN)
