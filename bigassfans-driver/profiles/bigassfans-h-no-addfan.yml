@@ -59,3 +59,10 @@ preferences:
     preferenceType: boolean
     definition:
       default: true
+  - title: "No Physical Light"
+    name: noLight
+    description: "Enable if this specific unit has no light kit fitted — removes the Light tile instead of showing dead controls. Disable to bring the Light tile back if this was set by mistake."
+    required: false
+    preferenceType: boolean
+    definition:
+      default: false

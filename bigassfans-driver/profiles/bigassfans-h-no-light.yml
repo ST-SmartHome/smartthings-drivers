@@ -1,4 +1,4 @@
-name: bigassfans-h.v1
+name: bigassfans-h-no-light.v1
 components:
   - id: main
     label: "Fan"
@@ -23,15 +23,6 @@ components:
         version: 1
     categories:
       - name: Fan
-  - id: light
-    label: "Light"
-    capabilities:
-      - id: switch
-        version: 1
-      - id: switchLevel
-        version: 1
-    categories:
-      - name: Light
   - id: management
     label: "Manage"
     capabilities:
@@ -70,4 +61,4 @@ preferences:
     required: false
     preferenceType: boolean
     definition:
-      default: false
+      default: true
