@@ -98,6 +98,18 @@ local function start_polling(driver, device)
   device:set_field(POLL_TIMER_FIELD, timer)
 end
 
+-- How long to wait after a commit before re-querying state. Found
+-- 2026-08-22: querying immediately (0s) reads back the fan's PRE-commit
+-- state almost every time — confirmed via logcat, a setFanSpeed(7) command
+-- was followed by an emitted fanSpeed=4 (the old value) only 172ms later,
+-- nowhere near enough time for the fan to have applied a new speed
+-- setpoint. That stale read-back looked exactly like "the value reverted"
+-- in the app, because it did — to a snapshot taken before the commit had
+-- landed. Not empirically tuned against real hardware response time, just
+-- picked to clearly clear that race — revisit if state still reads stale
+-- this long after a command.
+local REFRESH_DELAY_SECONDS = 2
+
 local function send_commit(driver, device, props, refresh_after)
   local ip = resolve_ip(device)
   if not ip then
@@ -110,7 +122,9 @@ local function send_commit(driver, device, props, refresh_after)
     return
   end
   if refresh_after then
-    poll_once(driver, device)
+    device.thread:call_with_delay(REFRESH_DELAY_SECONDS, function()
+      poll_once(driver, device)
+    end)
   end
 end
 
