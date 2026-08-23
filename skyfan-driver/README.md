@@ -176,6 +176,13 @@ each fan's `local_key`/device ID/IP from the Tuya Cloud API — it's the
 actively-maintained, full-featured version of the same Cloud-API flow this
 driver's protocol layer was reverse-engineered against.
 
+> **Don't use the Cloud API's `ip` field as the device's local IP.** It
+> reports the address Tuya's servers last saw the device connect *from*,
+> which is your router's public WAN IP, not the fan's LAN address — the
+> `local_key`/device ID from this lookup are what you need from the cloud
+> side, but the actual local IP still has to come from your own network
+> (router/AP client list, by MAC address).
+
 First fan: **Add Device → Scan Nearby** → "Skyfan DC" → add → device
 settings → fill in the real IP/local_key/device ID (overwriting the
 placeholders) → save. Polling starts automatically.
