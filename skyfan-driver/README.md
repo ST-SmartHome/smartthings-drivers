@@ -167,6 +167,15 @@ Capability presentation:
 
 ## Adding a fan (in the SmartThings app)
 
+**Getting the IP/local_key/device ID first**: this driver doesn't include
+a credential-lookup tool, since that needs your own Tuya IoT Platform
+project's client ID/secret — real API credentials that don't belong in a
+shared repo. Use [jasonacox/tinytuya](https://github.com/jasonacox/tinytuya)
+directly (`pip install tinytuya`, then `python -m tinytuya wizard`) to pull
+each fan's `local_key`/device ID/IP from the Tuya Cloud API — it's the
+actively-maintained, full-featured version of the same Cloud-API flow this
+driver's protocol layer was reverse-engineered against.
+
 First fan: **Add Device → Scan Nearby** → "Skyfan DC" → add → device
 settings → fill in the real IP/local_key/device ID (overwriting the
 placeholders) → save. Polling starts automatically.
