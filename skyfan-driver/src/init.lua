@@ -23,7 +23,70 @@ local COLOR_TEMP_CAP = capabilities["aboutisland47519.skyfanColorTemp"]
 -- these exact three strings, so no conversion is needed either direction.
 local VALID_WORK_MODES = {Warmwhite = true, Naturalwhite = true, Coolwhite = true}
 
+-- ===== Light child devices (2026-08-25) =====
+--
+-- Ported from bigassfans-driver, where this is already confirmed working
+-- end-to-end (Alexa's SmartThings integration discovers by *device*, not
+-- by component — a fan's `light` component never showed up as its own
+-- Alexa entity, only `main` did). Same design, adapted to this driver's
+-- Tuya DPS protocol instead of BAF's i6 protocol:
+--
+-- Identity is a plain device_network_id suffix, NOT device.profile.id —
+-- a profile-id check would misidentify every device as "not a child" on
+-- first boot (the profile UUID isn't known/hardcoded yet). Real fan DNIs
+-- here (`skyfan-dc-tuya-1`, `skyfan-dc-tuya-<timestamp>-<random>` from
+-- "Add another fan") never end in "-light", so there's no collision risk.
+--
+-- Piloted on one real fan first before being made automatic here for
+-- every fan with a physical light, including ones
+-- added in the future — confirmed working end-to-end on this driver's
+-- own Tuya/DPS write path specifically, not just carried over from
+-- bigassfans-driver's confirmation. See skyfan-driver-project-status
+-- memory for the pilot's test results.
+local LIGHT_CHILD_DNI_SUFFIX = "-light"
+local LIGHT_CHILD_PROFILE = "skyfan-light-child.v1"
+
+local function light_child_dni(parent)
+  return parent.device_network_id .. LIGHT_CHILD_DNI_SUFFIX
+end
+
+--- True only for a light-child device this driver itself created.
+local function is_light_child(device)
+  return device.device_network_id ~= nil
+    and device.device_network_id:sub(-#LIGHT_CHILD_DNI_SUFFIX) == LIGHT_CHILD_DNI_SUFFIX
+end
+
+--- Finds a parent's already-created light-child device by scanning the
+--- driver's known devices for the expected DNI — observed live state,
+--- not a persisted "we already did this" flag (this project's own
+--- history: install/redeploy reporting success is not proof the driver
+--- process actually restarted, let alone that a requested device
+--- creation landed).
+local function find_light_child(driver, parent)
+  local expected_dni = light_child_dni(parent)
+  for _, d in pairs(driver:get_devices()) do
+    if d.device_network_id == expected_dni then
+      return d
+    end
+  end
+  return nil
+end
+
+--- A light-child device has no ipAddress/localKey/deviceId preferences of
+--- its own (its profile doesn't declare them) — falls back to whatever
+--- its parent resolves to, recursively (one level in practice, since a
+--- child never spawns its own child). Safe to call device:get_parent_device()
+--- here: unlike the added/init lifecycle events the SDK docs warn about,
+--- this only ever runs from a capability command handler or the poll
+--- path, neither of which is added/init.
 local function get_settings(device)
+  if is_light_child(device) then
+    local parent = device:get_parent_device()
+    if not parent then
+      return {}
+    end
+    return get_settings(parent)
+  end
   local prefs = device.preferences or {}
   return {
     ip = prefs.ipAddress,
@@ -40,7 +103,7 @@ end
 -- generalizes to any installation, not just whichever units happened to
 -- be no-light ones on the driver author's own network.
 
-local function apply_status(device, dps)
+local function apply_fan_status(device, dps)
   if dps["1"] ~= nil then
     device:emit_event(capabilities.switch.switch(dps["1"] and "on" or "off"))
   end
@@ -56,16 +119,44 @@ local function apply_status(device, dps)
   if dps["22"] ~= nil then
     device:emit_event(SLEEP_TIMER_CAP.countdown({value = tostring(dps["22"])}))
   end
+end
+
+--- Handles three cases uniformly, same pattern as bigassfans-driver's
+--- equivalent function: (1) a light-child device — emits directly on its
+--- own (only) "main" component; (2) a not-yet-split device that still has
+--- a `light` component in its active profile — emits there, unchanged
+--- from before; (3) a split/no-light device with neither — safely
+--- no-ops. Reused for both the parent (called from poll_once with its
+--- own light component) and a light child (called from poll_once with
+--- the same fresh dps).
+local function apply_light_status(device, dps)
+  if is_light_child(device) then
+    if dps["15"] ~= nil then
+      device:emit_event(capabilities.switch.switch(dps["15"] and "on" or "off"))
+    end
+    if dps["16"] ~= nil then
+      local percent = math.floor((dps["16"] / 5) * 100 + 0.5)
+      device:emit_event(capabilities.switchLevel.level(percent))
+    end
+    if dps["19"] ~= nil then
+      local preset = VALID_WORK_MODES[dps["19"]] and dps["19"] or "Naturalwhite"
+      device:emit_event(COLOR_TEMP_CAP.colorTempPreset(preset))
+    end
+    return
+  end
 
   local light = device.profile.components.light
-  if light and dps["15"] ~= nil then
+  if not light then
+    return
+  end
+  if dps["15"] ~= nil then
     device:emit_component_event(light, capabilities.switch.switch(dps["15"] and "on" or "off"))
   end
-  if light and dps["16"] ~= nil then
+  if dps["16"] ~= nil then
     local percent = math.floor((dps["16"] / 5) * 100 + 0.5)
     device:emit_component_event(light, capabilities.switchLevel.level(percent))
   end
-  if light and dps["19"] ~= nil then
+  if dps["19"] ~= nil then
     local preset = VALID_WORK_MODES[dps["19"]] and dps["19"] or "Naturalwhite"
     device:emit_component_event(light, COLOR_TEMP_CAP.colorTempPreset(preset))
   end
@@ -76,8 +167,15 @@ end
 --- calls this synchronously before registering the recurring timer — if it
 --- throws instead of returning, the timer registration line never runs and
 --- polling silently never starts, permanently, until the driver restarts.
+--- Only ever called on a parent (fan) device — a light-child has no
+--- polling timer of its own (see start_polling/device_init) and gets its
+--- state exclusively from the parent's own poll cycle below, so this
+--- stays one TCP connection per cycle per physical fan either way.
 local function poll_once(driver, device)
   local ok, err = pcall(function()
+    if is_light_child(device) then
+      return
+    end
     local s = get_settings(device)
     if not s.ip or not s.local_key or not s.device_id then
       log.warn("Skyfan DC device missing IP/local_key/device_id — skipping poll")
@@ -91,14 +189,29 @@ local function poll_once(driver, device)
     end
 
     log.info("Skyfan DC status: " .. (require "dkjson").encode(dps))
-    apply_status(device, dps)
+    apply_fan_status(device, dps)
+    apply_light_status(device, dps)
+
+    -- If a light-child has been created for this fan, push the same
+    -- fresh dps to it too — one query, two devices updated.
+    local child = find_light_child(driver, device)
+    if child then
+      apply_light_status(child, dps)
+    end
   end)
   if not ok then
     log.error("Skyfan DC poll crashed: " .. tostring(err))
   end
 end
 
+--- Never called for a light-child device (device_init routes those away
+--- before reaching this) — defensive check kept here too since a stray
+--- call would otherwise start a redundant second poll loop against the
+--- same fan.
 local function start_polling(driver, device)
+  if is_light_child(device) then
+    return
+  end
   local existing_timer = device:get_field(POLL_TIMER_FIELD)
   if existing_timer then
     device.thread:cancel_timer(existing_timer)
@@ -117,6 +230,23 @@ local function start_polling(driver, device)
   end, "skyfan_poll")
   device:set_field(POLL_TIMER_FIELD, timer)
   log.info(string.format("Skyfan DC polling started: %s every %ds", s.ip, s.poll_interval))
+end
+
+--- poll_once is a no-op when called directly on a light-child (it has no
+--- polling loop of its own — see poll_once/start_polling above), so a
+--- command's post-write refresh needs redirecting to the parent's
+--- poll_once instead, or a command sent to the child would silently
+--- never show its own result. get_parent_device() is safe here: this
+--- only ever runs from a capability command handler, not added/init.
+local function refresh_after_command(driver, device)
+  if is_light_child(device) then
+    local parent = device:get_parent_device()
+    if parent then
+      poll_once(driver, parent)
+    end
+    return
+  end
+  poll_once(driver, device)
 end
 
 local function send_dp(driver, device, dps, refresh_after)
@@ -138,7 +268,7 @@ local function send_dp(driver, device, dps, refresh_after)
     return
   end
   if refresh_after then
-    poll_once(driver, device)
+    refresh_after_command(driver, device)
   end
 end
 
@@ -157,11 +287,20 @@ local NO_LIGHT_NO_ADDFAN_PROFILE = "skyfan-dc-no-light-no-addfan.v1"
 --- noLight/hideAddFan preferences. Defaults to the original with-light,
 --- with-add-fan-button profile — the same default this driver has always
 --- used — unless the user has explicitly opted a given tile away.
-local function profile_for(device)
+--- has_light_child is computed by the caller via find_light_child
+--- (observed live state) — once a light-child device is confirmed to
+--- actually exist, this device is treated as noLight regardless of that
+--- preference's raw value, since its light is now controlled through the
+--- child instead. Deliberately does NOT write the noLight preference
+--- itself (no preference-write path exists — see
+--- smartthings-edge-driver-gotchas memory); this only affects which
+--- profile ensure_correct_profile picks.
+local function profile_for(device, has_light_child)
   local prefs = device.preferences or {}
-  if prefs.noLight and prefs.hideAddFan then
+  local no_light = prefs.noLight or has_light_child
+  if no_light and prefs.hideAddFan then
     return NO_LIGHT_NO_ADDFAN_PROFILE
-  elseif prefs.noLight then
+  elseif no_light then
     return NO_LIGHT_PROFILE
   elseif prefs.hideAddFan then
     return NO_ADDFAN_PROFILE
@@ -229,8 +368,12 @@ local PROFILE_TO_ID = {
 -- entirely — now always retries try_update_metadata on every device_init
 -- where the live profile doesn't match, which is safe precisely because
 -- device_init can't fire more than once per restart.
-local function ensure_correct_profile(device)
-  local target = profile_for(device)
+--- Only ever called for a parent (fan) device — a light-child always has
+--- exactly one profile (LIGHT_CHILD_PROFILE) and never switches, so it's
+--- routed away from this in device_init before it would get here.
+local function ensure_correct_profile(driver, device)
+  local has_light_child = find_light_child(driver, device) ~= nil
+  local target = profile_for(device, has_light_child)
   local target_id = PROFILE_TO_ID[target]
 
   if device.profile.id == target_id then
@@ -249,13 +392,62 @@ local function ensure_correct_profile(device)
   device:set_field(ACTIVE_PROFILE_FIELD, target, { persist = true })
 end
 
+--- Creates a light-child device for this fan — automatic for every fan
+--- with a physical light (confirmed working end-to-end via a real pilot
+--- fan, see skyfan-driver-project-status memory), skipped
+--- for a noLight device (nothing to split off) or if called on a child
+--- itself. Idempotent via find_light_child (observed state), so safe to
+--- call on every init. Deliberately does NOT also switch this device's
+--- own profile in the same pass — ensure_correct_profile picks up
+--- has_light_child on whichever LATER init actually observes the child
+--- existing (naturally true here already, since try_create_device is
+--- fire-and-forget and the platform won't have created it synchronously
+--- within this same call) — create-then-confirm-then-switch stays two
+--- effectively-separate steps even though the code is textually
+--- adjacent, so a failed/delayed creation can never leave the light
+--- orphaned mid-migration.
+local function ensure_light_child(driver, device)
+  if is_light_child(device) then
+    return
+  end
+  if device.preferences and device.preferences.noLight then
+    return
+  end
+  if find_light_child(driver, device) then
+    return
+  end
+  local label = (device.label or device.id) .. " Light"
+  local ok, err = driver:try_create_device({
+    type = "LAN",
+    device_network_id = light_child_dni(device),
+    label = label,
+    profile = LIGHT_CHILD_PROFILE,
+    manufacturer = "Ventair",
+    model = "Skyfan DC (light)",
+    vendor_provided_label = label,
+    parent_device_id = device.id,
+  })
+  if not ok and not tostring(err):find("DNI already exists") then
+    log.error("Skyfan DC failed to create light-child device for " .. device.id .. ": " .. tostring(err))
+  else
+    log.info("Skyfan DC requested light-child device creation for " .. device.id)
+  end
+end
+
 local function device_init(driver, device)
   log.info("Skyfan DC device init: " .. device.id)
+  if is_light_child(device) then
+    -- No profile-switch logic (always LIGHT_CHILD_PROFILE, never
+    -- changes) and no polling timer of its own — state comes entirely
+    -- from the parent's own poll cycle. See start_polling/poll_once.
+    return
+  end
   -- Also covers migrating devices provisioned under an older with-light
   -- profile name (v1 -> v2 added the "Add another fan" button) — same
   -- pattern/reasoning as the SolarEdge driver's migration, see
   -- smartthings-edge-driver-gotchas memory.
-  ensure_correct_profile(device)
+  ensure_correct_profile(driver, device)
+  ensure_light_child(driver, device)
   start_polling(driver, device)
 end
 
@@ -295,8 +487,14 @@ end
 
 -- ===== Capability commands =====
 
+--- command.component == "light" covers a not-yet-split device (still on
+--- a profile with both main+light components); is_light_child(device)
+--- covers a split device's separate light device (whose only component
+--- is "main", so the component check alone would wrongly fall through to
+--- the fan branch). Both checks needed side by side — devices in either
+--- state can exist at once while the pilot is scoped to one fan.
 local function switch_on(driver, device, command)
-  if command.component == "light" then
+  if is_light_child(device) or command.component == "light" then
     send_dp(driver, device, {["15"] = true}, true)
   else
     send_dp(driver, device, {["1"] = true}, true)
@@ -304,7 +502,7 @@ local function switch_on(driver, device, command)
 end
 
 local function switch_off(driver, device, command)
-  if command.component == "light" then
+  if is_light_child(device) or command.component == "light" then
     send_dp(driver, device, {["15"] = false}, true)
   else
     send_dp(driver, device, {["1"] = false}, true)
@@ -339,7 +537,7 @@ local function set_countdown(driver, device, command)
 end
 
 local function refresh_handler(driver, device, command)
-  poll_once(driver, device)
+  refresh_after_command(driver, device)
 end
 
 local function add_another_handler(driver, device, command)
