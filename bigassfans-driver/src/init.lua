@@ -553,8 +553,83 @@ local function set_mode(driver, device, command)
   send_commit(driver, device, { fan_mode = value }, true)
 end
 
+-- CORRECTED: the "never takes effect" conclusion that removed this
+-- handler was wrong — reverse_enable does get committed, just with an
+-- unpredictable delay (confirmed when a fan turned up running
+-- reverse_enable=true, well after the original short wait-then-verify
+-- test looked like it failed). Handler restored. Known real limitation:
+-- a command sent here may not visibly apply for some unknown period
+-- afterward (minutes, possibly longer) — the app has no way to indicate
+-- "pending", so a user re-sending the same command because nothing
+-- seemed to happen can end up with both the original and the retry
+-- landing unpredictably later. No fix for that currently; just something
+-- to keep in mind.
+--
+-- Also added a stop-the-fan-first interlock, since this original code
+-- committed reverse_enable directly regardless of whether the fan was
+-- spinning -- the exact sequence that likely caused the incident above,
+-- worked around manually (stop, verify stopped, then flip) via a
+-- standalone fix script at the time. That manual sequence is now built
+-- into the handler instead of relying on doing it by hand again.
+local MAX_STOP_ATTEMPTS = 3
+
+--- Re-queries FAN and, once confirmed stopped (fan_mode OFF and speed 0),
+--- commits reverse_enable and hands off to the normal verify_commit path.
+--- Retries the stop commit up to MAX_STOP_ATTEMPTS times if the fan
+--- hasn't confirmed stopped yet -- fan_mode/speed are both known to apply
+--- immediately (unlike reverse_enable/whoosh_enable), so this shouldn't
+--- need more than one or two rounds in practice. Wrapped in pcall for the
+--- same reason as verify_commit -- runs from a scheduled callback.
+local function verify_stopped_then_set_direction(driver, device, ip, target_reverse, attempt)
+  local ok, err = pcall(function()
+    local results, query_err = BafClient.query_multi(ip, { "FAN" }, 5)
+    local fan = results and results["FAN"]
+    if fan and fan.fan_mode == baf.OFF_ON_AUTO.OFF and fan.speed == 0 then
+      apply_fan_status(device, fan)
+      local props = { reverse_enable = target_reverse }
+      local committed, commit_err = BafClient.commit(ip, props, 5)
+      if not committed then
+        log.error("BAF direction commit failed after confirming stopped: " .. tostring(commit_err))
+        return
+      end
+      device.thread:call_with_delay(REFRESH_DELAY_SECONDS, function()
+        verify_commit(driver, device, ip, props, "FAN", 1)
+      end)
+      return
+    end
+    if attempt < MAX_STOP_ATTEMPTS then
+      log.warn("BAF fan not yet confirmed stopped before direction change (attempt " ..
+        attempt .. "), resending stop: " .. tostring(query_err))
+      BafClient.commit(ip, { fan_mode = baf.OFF_ON_AUTO.OFF }, 5)
+      device.thread:call_with_delay(REFRESH_DELAY_SECONDS, function()
+        verify_stopped_then_set_direction(driver, device, ip, target_reverse, attempt + 1)
+      end)
+    else
+      log.error("BAF fan did not confirm stopped after " .. attempt ..
+        " attempts -- aborting direction change for motor safety")
+      poll_once(driver, device)
+    end
+  end)
+  if not ok then
+    log.error("BAF stop-then-direction sequence crashed: " .. tostring(err))
+  end
+end
+
 local function set_direction(driver, device, command)
-  send_commit(driver, device, { reverse_enable = command.args.direction == "Reverse" }, true)
+  local ip = resolve_ip(device)
+  if not ip then
+    log.warn("BAF setDirection attempted before device has a known IP")
+    return
+  end
+  local target_reverse = command.args.direction == "Reverse"
+  local stopped, err = BafClient.commit(ip, { fan_mode = baf.OFF_ON_AUTO.OFF }, 5)
+  if not stopped then
+    log.error("BAF direction-change stop commit failed: " .. tostring(err))
+    return
+  end
+  device.thread:call_with_delay(REFRESH_DELAY_SECONDS, function()
+    verify_stopped_then_set_direction(driver, device, ip, target_reverse, 1)
+  end)
 end
 
 local function set_whoosh(driver, device, command)
