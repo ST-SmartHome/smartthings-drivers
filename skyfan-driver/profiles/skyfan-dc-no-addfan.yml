@@ -20,11 +20,11 @@ components:
   - id: light
     label: "Light"
     capabilities:
+      - id: aboutisland47519.skyfanColorTemp
+        version: 1
       - id: switch
         version: 1
       - id: switchLevel
-        version: 1
-      - id: aboutisland47519.skyfanColorTemp
         version: 1
     categories:
       - name: Light

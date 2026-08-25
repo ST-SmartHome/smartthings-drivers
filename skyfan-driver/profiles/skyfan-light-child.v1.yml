@@ -1,0 +1,15 @@
+name: skyfan-light-child.v1
+components:
+  - id: main
+    label: "Light"
+    capabilities:
+      - id: aboutisland47519.skyfanColorTemp
+        version: 1
+      - id: switch
+        version: 1
+      - id: switchLevel
+        version: 1
+      - id: refresh
+        version: 1
+    categories:
+      - name: Light
