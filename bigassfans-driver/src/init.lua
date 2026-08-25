@@ -121,6 +121,90 @@ end
 -- this long after a command.
 local REFRESH_DELAY_SECONDS = 2
 
+-- How many times to (re)send a commit if it doesn't verify as applied.
+-- Mirrors the read-path retry above, for the same reason: on a
+-- sufficiently lossy Wi-Fi link, BafClient.commit's local sock:send()
+-- succeeding only proves the write left this box, not that it reached
+-- the fan. Unlike reads, a lost commit produced no error and no retry at
+-- all before this fix — the app's toggle would just spin and silently
+-- revert to the fan's real (unchanged) state on the next refresh.
+local MAX_COMMIT_ATTEMPTS = 2
+
+--- Every send_commit call sets fields from exactly one query category
+--- (FAN or LIGHT) — never both in the same call, across every capability
+--- handler in this file. Used to know which category to re-query to
+--- verify a commit actually took effect.
+local function category_of_props(props)
+  for name in pairs(props) do
+    local def = baf.FIELDS[name]
+    if def then
+      return def.category
+    end
+  end
+  return nil
+end
+
+--- Checks the freshly-queried category result against what we tried to
+--- commit — true only if every committed field reads back as the value we
+--- sent.
+local function props_applied(props, category_result)
+  if not category_result then
+    return false
+  end
+  for name, value in pairs(props) do
+    if category_result[name] ~= value then
+      return false
+    end
+  end
+  return true
+end
+
+--- Emits only the one category's status (FAN or LIGHT) — used after a
+--- verified commit, where we've only just re-queried that one category and
+--- shouldn't claim to have fresher data than we do for the other one.
+local function apply_fan_status_or_light(device, category, result)
+  if category == "FAN" then
+    apply_fan_status(device, result)
+  elseif category == "LIGHT" then
+    apply_light_status(device, result)
+  end
+end
+
+--- Verifies a commit actually landed on the fan, resending it once if not,
+--- before finally refreshing the device's full state either way (so
+--- SmartThings ends up in sync with reality even on the failure path,
+--- rather than staying silently stale). Wrapped in pcall same as
+--- poll_once — this also runs from a scheduled call_with_delay callback,
+--- and an uncaught error here shouldn't take down the driver's event loop
+--- (see smartthings-edge-driver-gotchas memory on this exact lesson).
+local function verify_commit(driver, device, ip, props, category, attempt)
+  local ok, err = pcall(function()
+    local results, query_err = BafClient.query_multi(ip, { category }, 5)
+    if results and props_applied(props, results[category]) then
+      apply_fan_status_or_light(device, category, results[category])
+      return
+    end
+    if attempt < MAX_COMMIT_ATTEMPTS then
+      log.warn("BAF commit didn't verify as applied (attempt " .. attempt ..
+        "), resending: " .. tostring(query_err))
+      local resent, resend_err = BafClient.commit(ip, props, 5)
+      if not resent then
+        log.error("BAF commit resend failed: " .. tostring(resend_err))
+      end
+      device.thread:call_with_delay(REFRESH_DELAY_SECONDS, function()
+        verify_commit(driver, device, ip, props, category, attempt + 1)
+      end)
+    else
+      log.error("BAF commit did not verify as applied after " .. attempt ..
+        " attempts — refreshing full state so the app reflects reality")
+      poll_once(driver, device)
+    end
+  end)
+  if not ok then
+    log.error("BAF commit verification crashed: " .. tostring(err))
+  end
+end
+
 local function send_commit(driver, device, props, refresh_after)
   local ip = resolve_ip(device)
   if not ip then
@@ -133,8 +217,13 @@ local function send_commit(driver, device, props, refresh_after)
     return
   end
   if refresh_after then
+    local category = category_of_props(props)
     device.thread:call_with_delay(REFRESH_DELAY_SECONDS, function()
-      poll_once(driver, device)
+      if category then
+        verify_commit(driver, device, ip, props, category, 1)
+      else
+        poll_once(driver, device)
+      end
     end)
   end
 end
