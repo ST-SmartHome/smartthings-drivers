@@ -1,0 +1,17 @@
+name: bigassfans-light-child.v1
+components:
+  - id: main
+    label: "Light"
+    capabilities:
+      - id: switch
+        version: 1
+      - id: switchLevel
+        version: 1
+        config:
+          values:
+            - key: "switchLevel.level"
+              range: [0, 100]
+      - id: refresh
+        version: 1
+    categories:
+      - name: Light
