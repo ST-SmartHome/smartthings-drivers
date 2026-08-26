@@ -21,6 +21,12 @@ components:
         version: 1
       - id: aboutisland47519.ecoMode
         version: 1
+      - id: aboutisland47519.ledIndicators
+        version: 1
+      - id: aboutisland47519.fanBeep
+        version: 1
+      - id: aboutisland47519.legacyIrRemote
+        version: 1
     categories:
       - name: Fan
 preferences:

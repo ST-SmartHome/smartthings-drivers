@@ -12,6 +12,9 @@ local FAN_MODE_CAP = capabilities["aboutisland47519.fanMode"]
 local FAN_DIRECTION_CAP = capabilities["aboutisland47519.fanDirection"]
 local WHOOSH_CAP = capabilities["aboutisland47519.whoosh"]
 local ECO_CAP = capabilities["aboutisland47519.ecoMode"]
+local LED_INDICATORS_CAP = capabilities["aboutisland47519.ledIndicators"]
+local FAN_BEEP_CAP = capabilities["aboutisland47519.fanBeep"]
+local LEGACY_IR_REMOTE_CAP = capabilities["aboutisland47519.legacyIrRemote"]
 local ADD_ANOTHER_CAP = capabilities["aboutisland47519.addAnotherFan"]
 
 local OFF_ON_AUTO_TO_STRING = { [0] = "Off", [1] = "On", [2] = "Auto" }
@@ -333,6 +336,61 @@ local function send_commit(driver, device, props, refresh_after)
   end
 end
 
+-- Maps a MORE field name (see baf_protocol.lua) to the emit function for
+-- its capability, so send_more_commit can stay generic across all three.
+local MORE_CAP_EMIT = {
+  led_indicators_enable = function(device, value)
+    device:emit_event(LED_INDICATORS_CAP.ledIndicators({ value = value and "On" or "Off" }))
+  end,
+  fan_beep_enable = function(device, value)
+    device:emit_event(FAN_BEEP_CAP.fanBeep({ value = value and "On" or "Off" }))
+  end,
+  legacy_ir_remote_enable = function(device, value)
+    device:emit_event(LEGACY_IR_REMOTE_CAP.legacyIrRemote({ value = value and "On" or "Off" }))
+  end,
+}
+
+--- Commits exactly one MORE-category field (led_indicators_enable /
+--- fan_beep_enable / legacy_ir_remote_enable) via
+--- BafClient.commit_and_verify_more and emits whatever it actually
+--- confirmed. Deliberately separate from send_commit/verify_commit —
+--- those exist for fields the regular FAN/LIGHT poll cycle can read back
+--- on its own; these three can't be read back that way at all (see
+--- baf_protocol.lua and BafClient.commit_and_verify_more for why), so
+--- there's no "next poll picks it up" safety net to fall back on the way
+--- every other command in this file has.
+---
+--- If the push burst didn't confirm the field within the read window,
+--- this still emits the requested value optimistically (the commit did
+--- go out — fire-and-forget applies here same as everywhere else in this
+--- driver) rather than leaving the app showing stale/blank state, but
+--- logs a warning so an actual failure doesn't look identical to a
+--- merely-slow confirmation in the logs.
+local function send_more_commit(device, field_name, value)
+  local ip = resolve_ip(device)
+  if not ip then
+    log.warn("BAF command attempted before device has a known IP")
+    return
+  end
+  local sent_ok, verified, err = BafClient.commit_and_verify_more(ip, { [field_name] = value }, 5)
+  if not sent_ok then
+    log.error("BAF MORE commit failed for " .. field_name .. ": " .. tostring(err))
+    return
+  end
+  local emit = MORE_CAP_EMIT[field_name]
+  if not emit then
+    log.error("BAF MORE commit: no emit mapping for " .. field_name)
+    return
+  end
+  if verified and verified[field_name] ~= nil then
+    emit(device, verified[field_name])
+  else
+    log.warn("BAF MORE commit for " .. field_name ..
+      " sent but not confirmed by a push within the read window — showing requested value optimistically")
+    emit(device, value)
+  end
+end
+
 -- ===== Lifecycle =====
 
 -- Same pattern as skyfan-driver's profile-switch mechanism (see
@@ -640,6 +698,18 @@ local function set_eco(driver, device, command)
   send_commit(driver, device, { eco_enable = command.args.eco == "On" }, true)
 end
 
+local function set_led_indicators(driver, device, command)
+  send_more_commit(device, "led_indicators_enable", command.args.ledIndicators == "On")
+end
+
+local function set_fan_beep(driver, device, command)
+  send_more_commit(device, "fan_beep_enable", command.args.fanBeep == "On")
+end
+
+local function set_legacy_ir_remote(driver, device, command)
+  send_more_commit(device, "legacy_ir_remote_enable", command.args.legacyIrRemote == "On")
+end
+
 --- poll_once is a no-op when called directly on a light-child (it has no
 --- polling loop of its own, see poll_once/start_polling above) — so a
 --- refresh command on the child needs redirecting to its parent's
@@ -693,6 +763,15 @@ local baf_driver = Driver("bigassfans-i6-lan", {
     },
     [ECO_CAP.ID] = {
       [ECO_CAP.commands.setEco.NAME] = set_eco,
+    },
+    [LED_INDICATORS_CAP.ID] = {
+      [LED_INDICATORS_CAP.commands.setLedIndicators.NAME] = set_led_indicators,
+    },
+    [FAN_BEEP_CAP.ID] = {
+      [FAN_BEEP_CAP.commands.setFanBeep.NAME] = set_fan_beep,
+    },
+    [LEGACY_IR_REMOTE_CAP.ID] = {
+      [LEGACY_IR_REMOTE_CAP.commands.setLegacyIrRemote.NAME] = set_legacy_ir_remote,
     },
     [capabilities.refresh.ID] = {
       [capabilities.refresh.commands.refresh.NAME] = refresh_handler,
