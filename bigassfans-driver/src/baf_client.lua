@@ -160,4 +160,96 @@ function BafClient.commit(ip, props, timeout_sec)
   return true
 end
 
+--- Commits one or more MORE-category properties (led_indicators_enable /
+--- fan_beep_enable / legacy_ir_remote_enable — see baf_protocol.lua) and
+--- attempts to verify them via the fan's own unsolicited push frames.
+---
+--- Confirmed empirically 2026-08-26 against a real fan: these three
+--- fields are never returned by a direct category query, in any of the 7
+--- known categories, in either field state — the official app instead
+--- holds one persistent connection and the fan pushes them unsolicited
+--- shortly after any commit. The push only happens on a connection that
+--- began with an identity query first: a bare commit with no prior query
+--- got zero pushes in 8s (a real negative control), while the identical
+--- commit preceded by a FIRMWARE_MORE_DATETIME_API query got a burst of
+--- ~5 frames within ~0.2s, with the just-committed field's new value
+--- visible partway through the burst.
+---
+--- Deliberately a separate function from BafClient.commit/query_multi
+--- rather than folded into their normal path — those stay a plain,
+--- minimal connect→request→read→close, unmodified, for every other
+--- field. Only ever call this for MORE-category properties.
+---
+--- Returns `sent_ok, verified_table, err`. `sent_ok` is true once the
+--- commit itself has gone out (the identity-query preamble and read
+--- burst can still fail without meaning the write failed — same
+--- fire-and-forget caveat as BafClient.commit). `verified_table` maps
+--- each requested field name to the value actually observed in the push
+--- burst, if any showed up (a field committed but never confirmed within
+--- the read window is simply absent from this table, not set to a wrong
+--- value — check for its presence, don't assume it's there).
+function BafClient.commit_and_verify_more(ip, props, timeout_sec)
+  local sock, err = socket.tcp()
+  if not sock then
+    return false, nil, "socket create failed: " .. tostring(err)
+  end
+  sock:settimeout(timeout_sec or 5)
+
+  local ok, connect_err = sock:connect(ip, BAF_PORT)
+  if not ok then
+    sock:close()
+    return false, nil, "connect failed: " .. tostring(connect_err)
+  end
+
+  -- Identity query first -- this is what unlocks the push burst below.
+  -- The response's actual content (name/model/mac/etc, same as any
+  -- ALL/FIRMWARE_MORE_DATETIME_API query) is unused; sending it and
+  -- reading the one response is what matters, not what's in it.
+  local identity_msg = baf.build_query(baf.QUERY_CATEGORY.FIRMWARE_MORE_DATETIME_API)
+  local identity_sent, identity_send_err = sock:send(slip.encode(identity_msg))
+  if not identity_sent then
+    sock:close()
+    return false, nil, "identity query send failed: " .. tostring(identity_send_err)
+  end
+  local identity_frame, identity_read_err = read_slip_frame(sock)
+  if not identity_frame then
+    sock:close()
+    return false, nil, "identity query read failed: " .. tostring(identity_read_err)
+  end
+
+  local commit_msg = baf.build_commit(props)
+  local commit_sent, commit_send_err = sock:send(slip.encode(commit_msg))
+  if not commit_sent then
+    sock:close()
+    return false, nil, "commit send failed: " .. tostring(commit_send_err)
+  end
+
+  -- Read the fan's push burst: several small frames arrive back-to-back
+  -- within ~0.2s on a real device, then stop. A short per-frame timeout
+  -- (rather than one long overall deadline) naturally ends the loop once
+  -- the burst is over, without needing wall-clock bookkeeping -- cosock's
+  -- socket doesn't expose a gettime() this driver already depends on
+  -- elsewhere, so this avoids adding that dependency for one function.
+  sock:settimeout(0.3)
+  local verified = {}
+  for _ = 1, 12 do -- generous headroom over the ~5 frames observed live
+    local frame = read_slip_frame(sock)
+    if not frame then
+      break
+    end
+    local payload = slip.decode(frame)
+    local result = baf.parse_category_result(payload, "MORE_PUSH")
+    if result then
+      for name in pairs(props) do
+        if result[name] ~= nil then
+          verified[name] = result[name]
+        end
+      end
+    end
+  end
+
+  sock:close()
+  return true, verified
+end
+
 return BafClient

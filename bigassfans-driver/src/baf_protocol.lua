@@ -71,6 +71,20 @@ baf.FIELDS = {
   -- temp control either)
   light_mode               = { no = 68, kind = "enum", category = "LIGHT", default = 0 },
   light_brightness_percent = { no = 69, kind = "int",  category = "LIGHT", default = 0 },
+
+  -- MORE — confirmed 2026-08-26 via a real packet capture of the official
+  -- app: these three are NEVER returned by a direct category query (all 7
+  -- known categories tried, in both field states) — the app instead holds
+  -- one persistent connection and the fan pushes them unsolicited
+  -- following any commit. No `default` set here, unlike every field
+  -- above: these never participate in parse_category_result's normal
+  -- default-fill pass, since that only runs for an explicit category
+  -- query — data these fields never arrive through. See
+  -- BafClient.commit_and_verify_more, the only code path that ever reads
+  -- or writes them.
+  led_indicators_enable   = { no = 134, kind = "bool", category = "MORE_PUSH" },
+  fan_beep_enable         = { no = 135, kind = "bool", category = "MORE_PUSH" },
+  legacy_ir_remote_enable = { no = 136, kind = "bool", category = "MORE_PUSH" },
 }
 
 local FIELD_BY_NO = {}
