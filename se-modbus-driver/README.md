@@ -89,11 +89,16 @@ inverterStatus` — no standard SmartThings capability fits inverter
 operating state, so it's a free-text status attribute visible in the app,
 not just in logs.
 
-## Remaining open items
+## Known limitation: one Modbus connection at a time
 
-- **Single Modbus connection at a time**: if anything else (Home Assistant,
-  etc.) polls this inverter's Modbus TCP service, this driver's connection
-  attempts will conflict with it.
+SolarEdge inverters only accept a single Modbus TCP connection at once —
+this is a hardware/firmware constraint of the inverter itself, not
+something this driver (or any driver) can work around. If anything else
+polls this inverter's Modbus TCP service at the same time (Home
+Assistant, another SmartThings driver instance, SolarEdge's own local
+tools), connection attempts will collide. Well-documented elsewhere too,
+e.g. the [solaredge-modbus-multi wiki](https://github.com/WillCodeForCats/solaredge-modbus-multi/wiki/Known-Issues).
+Only run one Modbus TCP integration against a given inverter at a time.
 
 ## SmartThings Community
 
