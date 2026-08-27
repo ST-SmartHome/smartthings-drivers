@@ -101,13 +101,16 @@ the platform's own `-460..10000` constraint), since bug #6 crashed the
 device's event thread when the platform rejected an out-of-range value —
 better to skip and log a bad reading than repeat that.
 
+## Inverter operating status
+
+`I_Status` (OFF/SLEEPING/STARTING/MPPT/THROTTLED/SHUTTING_DOWN/FAULT/
+STANDBY) is exposed as a custom capability, `aboutisland47519.
+inverterStatus` — no standard SmartThings capability fits inverter
+operating state, so it's a free-text status attribute visible in the app,
+not just in logs.
+
 ## Remaining open items
 
-- **Status capability**: `I_Status` (OFF/SLEEPING/STARTING/MPPT/THROTTLED/
-  SHUTTING_DOWN/FAULT/STANDBY) is read and logged but not yet exposed as a
-  SmartThings capability — no perfect standard capability fits inverter
-  operating state. Worth a custom capability later if you want it visible
-  in the app rather than just logs.
 - **Single Modbus connection at a time**: if anything else (Home Assistant,
   etc.) polls this inverter's Modbus TCP service, this driver's connection
   attempts will conflict with it.
