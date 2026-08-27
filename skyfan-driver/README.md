@@ -17,12 +17,6 @@ All three custom capability tiles (mode/direction/sleep timer) render
 correctly in the app. Multi-fan support is done via an explicit "Add
 another fan" button rather than automatic discovery — see Architecture.
 
-Credentials (IP/local_key/device ID) for all 8 physical fans in the house
-have been retrieved from the Tuya Cloud API and matched to their MACs via
-UniFi. Whether every one of those 8 has actually been added as a device in
-the SmartThings app yet (vs. just having credentials on hand) is a live
-app-state question — check the app, don't assume from this file.
-
 Deployed as `skyfan-tuya-lan`, driverId
 `b079f7d0-c6fd-4704-b760-131a6b660307`, channel `Drivers`
 (`781ea3f1-a95c-492f-9952-59ef19f43505`), installed on hub
@@ -49,10 +43,9 @@ smartthings edge:drivers:install <driverId> --hub <hubId> --channel <channelId>
 The driver was built and tested against a real physical fan — credentials
 (local IP, `local_key`, device ID) aren't reproduced here since they're
 per-device secrets, not something reusable by anyone reading this repo.
-Real values live only in device preferences (set via the app) and, for
-this household, the `skyfan-driver-project-status` auto-memory entry —
-re-run the Tuya Cloud API device list if they're ever needed again for a
-fresh install.
+Real values live only in your own device preferences (set via the app) —
+re-run the Tuya Cloud API device list (see "Adding a fan" below) if you
+ever need them again.
 
 Full DPS schema (from Tuya's Thing Model, not the filtered "standard
 function" endpoint, which only showed 4 of these 8):
@@ -290,6 +283,6 @@ capability was replaced with a custom 3-preset capability
 push-button (Warmwhite/Naturalwhite/Coolwhite), not a continuous dial —
 see the DPS table above.
 
-**2026-08-04 — initial bring-up complete**, all 8 physical fans' credentials
-obtained and confirmed working end-to-end; see "Bugs found and fixed" above
-for the crypto/framing/presentation issues hit along the way.
+**2026-08-04 — initial bring-up complete**, confirmed working end-to-end
+against real hardware; see "Bugs found and fixed" above for the
+crypto/framing/presentation issues hit along the way.
