@@ -136,13 +136,33 @@ end
 --- for setting one or more properties. `props` is { field_name = value },
 --- using the same names as baf.FIELDS; booleans as true/false, enums/ints
 --- as their integer value. Returns raw protobuf bytes.
+-- Field order within a single commit is NOT cosmetic: confirmed live against
+-- real hardware that this fan's firmware silently drops a speed change if
+-- the speed field is written before the fan_mode field in the same commit
+-- message, even though the two are semantically independent and fan_mode's
+-- value wasn't even changing. Lua's pairs() gives no ordering guarantee
+-- over the props table, and depending on the runtime it can consistently
+-- land in the bad order -- a commit built that way fails every time, never
+-- logged as an error because the write succeeds at the socket level; only
+-- the fan's own interpretation of it is order-sensitive. Sorting by field
+-- number here makes every caller's commit byte-order deterministic and
+-- matches the one order confirmed to work, regardless of what order the
+-- caller happened to build the props table in.
 function baf.build_commit(props)
+  local names = {}
+  for name in pairs(props) do
+    names[#names + 1] = name
+  end
+  table.sort(names, function(a, b)
+    local def_a, def_b = baf.FIELDS[a], baf.FIELDS[b]
+    if not def_a then error("baf.build_commit: unknown property '" .. tostring(a) .. "'") end
+    if not def_b then error("baf.build_commit: unknown property '" .. tostring(b) .. "'") end
+    return def_a.no < def_b.no
+  end)
   local props_bytes = {}
-  for name, value in pairs(props) do
+  for _, name in ipairs(names) do
+    local value = props[name]
     local def = baf.FIELDS[name]
-    if not def then
-      error("baf.build_commit: unknown property '" .. tostring(name) .. "'")
-    end
     if def.kind == "string" then
       props_bytes[#props_bytes + 1] = pb.encode_bytes_field(def.no, value)
     elseif def.kind == "bool" then
