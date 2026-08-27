@@ -6,6 +6,8 @@ same "local control, no cloud dependency" goal as the SolarEdge Modbus
 driver, adapted for a proprietary encrypted protocol instead of an open
 industrial one.
 
+SmartThings Community post: https://community.smartthings.com/t/st-edge-lan-driver-ventair-skyfan-dc-ceiling-fan/310702
+
 ## Status: working end-to-end
 
 Confirmed live against the real device: connects, decrypts and parses
