@@ -5,7 +5,7 @@ them over their local "i6" protocol (SLIP-framed protobuf over TCP, port
 31415) — no cloud dependency, no authentication of any kind. Sibling
 project to `../skyfan-driver` and `../se-modbus-driver`.
 
-## Status: working end-to-end, both household fans confirmed
+## Status: working end-to-end
 
 Deployed as `bigassfans-i6-lan`, driverId
 `e39b708d-4db9-4c7b-a76c-0d04e5fdcdd9`, channel `Drivers`
