@@ -119,8 +119,8 @@ script, and unit-test the Lua wire-format code against it directly.
   (e.g. field 207) are silently ignored — likely properties added by
   firmware newer than the library's schema capture, harmless to ignore
   for this driver's scope.
-- mDNS reflection across VLANs depends on the network's "Multicast DNS"
-  setting (a UniFi-specific term, may vary by router/controller) —
+- mDNS reflection across VLANs depends on a "Multicast DNS" or similar
+  setting on your router/controller (exact name and location vary) —
   confirmed enabled network-wide on the network this was tested on, but
   not empirically tested with a fan actually segmented onto a different
   VLAN from the hub (both fans tested are on the same network as each
