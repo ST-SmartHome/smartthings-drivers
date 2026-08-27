@@ -114,4 +114,4 @@ better to skip and log a bad reading than repeat that.
 
 ## SmartThings Community
 
-https://community.smartthings.com/t/st-edge-driver-solaredge-pv-inverter/310477/3
+https://community.smartthings.com/t/st-edge-driver-solaredge-pv-inverter/310477
