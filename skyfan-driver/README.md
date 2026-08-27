@@ -24,7 +24,15 @@ app-state question — check the app, don't assume from this file.
 Deployed as `skyfan-tuya-lan`, driverId
 `b079f7d0-c6fd-4704-b760-131a6b660307`, channel `Drivers`
 (`781ea3f1-a95c-492f-9952-59ef19f43505`), installed on hub
-`c215e4a2-98e7-4272-9cd8-ebf178079631`. Current profile: `skyfan-dc.v6`.
+`c215e4a2-98e7-4272-9cd8-ebf178079631`. Several profile variants now exist
+(`skyfan-dc[-no-light][-no-addfan].v1`, plus `skyfan-light-child.v1` for the
+auto-created light devices — see Changelog), chosen automatically per-device
+from preferences and whether a light child has been created, not a single
+fixed profile.
+
+Each fan's light is automatically split into its own child SmartThings
+device (see the 2026-08-25 Changelog entry) — no action needed, this just
+happens on first driver restart after updating.
 
 **Deploy workflow** (repackaging requires all three steps, every time —
 `install` alone on an already-installed driver is a no-op):
@@ -67,11 +75,20 @@ function" endpoint, which only showed 4 of these 8):
 - `profiles/skyfan-dc.yml` — three components:
   - `main` — fan `switch`, `fanSpeed`, `refresh`, and the three custom
     fan-control capabilities (mode/direction/sleep timer).
-  - `light` — `switch`, `switchLevel`, `colorTemperature`.
+  - `light` — `switch`, `switchLevel`, `aboutisland47519.skyfanColorTemp`
+    (present only until a fan's light child is created — see below).
   - `management` — just the `aboutisland47519.addAnotherFan` button, kept
     in its own trailing component specifically so it renders at the
     bottom of the device screen (component declaration order controls
     on-screen tile order).
+- `profiles/skyfan-light-child.v1.yml` — the auto-created light child
+  device's own profile (`switch`, `switchLevel`,
+  `aboutisland47519.skyfanColorTemp`). Every fan with a physical light
+  automatically gets one of these as a separate SmartThings device (DNI
+  `<parent-dni>-light`), so the light is visible to Alexa, which discovers
+  by device rather than by component. The parent fan device then migrates
+  off its own `light` component onto a light-less profile variant — see
+  the 2026-08-25 Changelog entry for the full mechanism.
 
   5 preferences: IP, local_key, device ID, protocol version, poll
   interval — every one has an obviously-fake placeholder `default`, which
@@ -196,6 +213,35 @@ smartthings edge:drivers:logcat b079f7d0-c6fd-4704-b760-131a6b660307 --hub-addre
 ```
 
 ## Changelog
+
+**2026-08-25 — each fan's light now gets its own separate SmartThings
+device, plus a real capability-presentation bug fixed.**
+
+- **Light split into a child device (for Alexa).** Alexa discovers by
+  device, not by component, so a fan's light was invisible to Alexa as
+  long as it lived on the fan's own device. Every fan with a physical
+  light now automatically gets a child device (profile
+  `skyfan-light-child.v1`) the first time the driver restarts after
+  updating — no preference to toggle, no manual action. The parent fan
+  device keeps everything else (speed, mode, direction, sleep timer);
+  the light child only handles switch/brightness/color-temp preset. The
+  parent's regular poll cycle pushes fresh status to the child too, so
+  this doesn't add a second TCP connection per cycle. If you see a new
+  device appear next to an existing fan after updating, that's expected
+  — it's the light, not a duplicate fan. (Ported from the same fix
+  already shipped on a sibling driver in this account.)
+- **`skyfanColorTemp` had no capability presentation defined at all** —
+  confirmed via a direct API check (`404 Capability Presentation is not
+  found`). SmartThings' fallback for an unpresented custom capability is
+  a single button with no value picker, which is what was actually
+  showing up in the app as a button that just cycles through colors with
+  no way to pick one directly. Fixed with a proper `displayType: list`
+  3-option presentation (Warm White / Natural White / Cool White),
+  matching the working `skyfanMode`/`skyfanDirection` tiles.
+
+No changes to existing fan speed/mode/direction/sleep-timer behavior.
+Both changes apply automatically once the driver update reaches your
+hub.
 
 **2026-08-20 — root cause found and fixed for a long-standing, hard-to-diagnose
 write-command failure.** Symptom: fan speed/switch/light commands would
