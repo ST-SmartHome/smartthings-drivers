@@ -21,11 +21,7 @@ components:
         version: 1
       - id: aboutisland47519.ecoMode
         version: 1
-      - id: aboutisland47519.ledIndicators
-        version: 1
-      - id: aboutisland47519.fanBeep
-        version: 1
-      - id: aboutisland47519.legacyIrRemote
+      - id: aboutisland47519.sleepMode
         version: 1
     categories:
       - name: Fan
@@ -33,6 +29,15 @@ components:
     label: "Manage"
     capabilities:
       - id: aboutisland47519.addAnotherFan
+        version: 1
+  - id: settings
+    label: "Settings"
+    capabilities:
+      - id: aboutisland47519.ledIndicators
+        version: 1
+      - id: aboutisland47519.fanBeep
+        version: 1
+      - id: aboutisland47519.legacyIrRemote
         version: 1
 preferences:
   - title: "Manual IP Override"

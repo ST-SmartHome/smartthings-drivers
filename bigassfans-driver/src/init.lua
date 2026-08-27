@@ -338,15 +338,26 @@ end
 
 -- Maps a MORE field name (see baf_protocol.lua) to the emit function for
 -- its capability, so send_more_commit can stay generic across all three.
+-- Targets the "settings" component explicitly via emit_component_event —
+-- device:emit_event alone implicitly targets "main", and these three
+-- capabilities live on their own "settings" component/page (moved there
+-- 2026-08-26 at the user's request, off the main Fan controls). Using
+-- plain emit_event here was a real bug caught live: the commit correctly
+-- reached the fan every time, but the capability's status stayed null on
+-- the platform forever, because the platform silently drops an event for
+-- a capability/component combination the profile doesn't declare.
 local MORE_CAP_EMIT = {
   led_indicators_enable = function(device, value)
-    device:emit_event(LED_INDICATORS_CAP.ledIndicators({ value = value and "On" or "Off" }))
+    device:emit_component_event(device.profile.components.settings,
+      LED_INDICATORS_CAP.ledIndicators({ value = value and "On" or "Off" }))
   end,
   fan_beep_enable = function(device, value)
-    device:emit_event(FAN_BEEP_CAP.fanBeep({ value = value and "On" or "Off" }))
+    device:emit_component_event(device.profile.components.settings,
+      FAN_BEEP_CAP.fanBeep({ value = value and "On" or "Off" }))
   end,
   legacy_ir_remote_enable = function(device, value)
-    device:emit_event(LEGACY_IR_REMOTE_CAP.legacyIrRemote({ value = value and "On" or "Off" }))
+    device:emit_component_event(device.profile.components.settings,
+      LEGACY_IR_REMOTE_CAP.legacyIrRemote({ value = value and "On" or "Off" }))
   end,
 }
 
