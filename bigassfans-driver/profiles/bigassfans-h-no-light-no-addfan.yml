@@ -1,4 +1,4 @@
-name: bigassfans-h-no-light-no-addfan.v1
+name: bigassfans-h-no-light-no-addfan.v3
 components:
   - id: main
     label: "Fan"
@@ -33,6 +33,8 @@ components:
       - id: aboutisland47519.fanBeep
         version: 1
       - id: aboutisland47519.legacyIrRemote
+        version: 1
+      - id: temperatureMeasurement
         version: 1
 preferences:
   - title: "Manual IP Override"

@@ -85,6 +85,15 @@ baf.FIELDS = {
   light_mode               = { no = 68, kind = "enum", category = "LIGHT", default = 0 },
   light_brightness_percent = { no = 69, kind = "int",  category = "LIGHT", default = 0 },
 
+  -- SENSORS — never swept before 2026-08-27. `temperature_raw` is scaled
+  -- ×100 (raw 3170 == 31.70°C) — confirmed against a real independent
+  -- weather station at the same location, not just guessed. `humidity`
+  -- (field 87) deliberately NOT modeled here — it consistently reads a
+  -- suspiciously round 100000 on both fans, matching `hasHumiditySensor:
+  -- false` already confirmed via the capabilities blob (field 17) — this
+  -- looks like a "not populated" sentinel, not a real reading.
+  temperature_raw = { no = 86, kind = "int", category = "SENSORS", default = 0 },
+
   -- MORE — confirmed 2026-08-26 via a real packet capture of the official
   -- app: these three are NEVER returned by a direct category query (all 7
   -- known categories tried, in both field states) — the app instead holds
@@ -159,13 +168,23 @@ local function decode_field_value(def, raw)
 end
 
 --- Parses a full Root message (already SLIP-decoded raw bytes) received
---- from the fan and returns a flat table { field_name = value, ... },
---- merging every repeated Properties chunk in the QueryResult.
---- `category` (a baf.QUERY_CATEGORY name, e.g. "FAN") is used to fill in
---- defaults for known fields of that category that the fan omitted
---- because they're at their zero value. Returns nil if the message
+--- from the fan and returns a flat table { field_name = value, ... } for
+--- every KNOWN field actually present, merging every repeated Properties
+--- chunk in the QueryResult. No category filtering and no default-fill —
+--- just what's actually in this one frame. Returns nil if the message
 --- doesn't contain a query_result at all (e.g. it was something else).
-function baf.parse_category_result(payload, category)
+---
+--- Building block for BafClient.query_multi's content-based response
+--- matching (2026-08-27) — a frame is identified by which fields it
+--- actually contains, not by assuming it answers whichever query was
+--- sent in the same position. A real off-by-one response lag was found
+--- in the fan's back-to-back-query behavior on one connection — the Nth
+--- frame read does not reliably correspond to the Nth category queried,
+--- for N >= 2. Confirmed against the real deployed code; affects the
+--- already-shipped FAN+LIGHT poll too, not just a new addition — masked
+--- there because verify_commit re-queries a single category alone after
+--- every command, which isn't affected (nothing to lag into).
+function baf.parse_frame_fields(payload)
   local root_fields = pb.parse_fields(payload)
   local root2_bytes = pb.last(root_fields, 2)
   if not root2_bytes then
@@ -178,13 +197,7 @@ function baf.parse_category_result(payload, category)
   end
   local qr_fields = pb.parse_fields(qr_bytes)
 
-  local result = {}
-  for name, def in pairs(baf.FIELDS) do
-    if def.category == category and def.default ~= nil then
-      result[name] = def.default
-    end
-  end
-
+  local found = {}
   for _, entry in ipairs(qr_fields[2] or {}) do
     local chunk_fields = pb.parse_fields(entry[2])
     for field_no, occurrences in pairs(chunk_fields) do
@@ -192,9 +205,32 @@ function baf.parse_category_result(payload, category)
       if name then
         local def = baf.FIELDS[name]
         local _, raw = table.unpack(occurrences[#occurrences])
-        result[name] = decode_field_value(def, raw)
+        found[name] = decode_field_value(def, raw)
       end
     end
+  end
+  return found
+end
+
+--- Same result shape this function has always returned — kept for the
+--- single-category callers (verify_commit, commit_and_verify_more),
+--- where there's no second read to lag and the original approach is
+--- already correct. `category` fills in defaults for known fields of
+--- that category the fan omitted because they're at their zero value.
+--- Implemented in terms of parse_frame_fields above.
+function baf.parse_category_result(payload, category)
+  local found = baf.parse_frame_fields(payload)
+  if not found then
+    return nil
+  end
+  local result = {}
+  for name, def in pairs(baf.FIELDS) do
+    if def.category == category and def.default ~= nil then
+      result[name] = def.default
+    end
+  end
+  for name, value in pairs(found) do
+    result[name] = value
   end
   return result
 end
