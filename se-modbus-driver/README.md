@@ -40,7 +40,8 @@ selectable condition in SmartThings Routines, confirmed via the app.
 - `config.yml` — driver metadata, `lan` + `discovery` permissions.
 - `profiles/solaredge-inverter.yml` — capabilities (powerMeter, energyMeter,
   temperatureMeasurement, refresh) and the IP/port/unitId/pollInterval
-  preferences. The `grid` component (see above) is declared here too.
+  preferences. The `grid` and `dc` components (see above) are declared
+  here too.
 - `src/discovery.lua` — unconditional single-device creation.
 - `src/init.lua` — lifecycle handlers, preference-driven polling loop.
 - `src/modbus.lua` — minimal Modbus TCP client (Read Holding Registers only,
@@ -77,10 +78,8 @@ unit ID (typically `1`), and poll interval (30s by default).
 | `main` | `refresh` | Manual refresh button |
 | `grid` (optional hardware) | `powerMeter` | Net grid power, signed — see "Grid import/export meter" above |
 | `grid` (optional hardware) | `aboutisland47519.gridEnergy` | Lifetime exported/imported energy (kWh) |
-
-DC voltage and DC power are read from the inverter every poll cycle and
-logged, but aren't currently exposed as app-visible capabilities — only
-in `logcat` output, not the SmartThings app itself.
+| `dc` | `voltageMeasurement` | DC voltage straight off the solar panels, before inversion |
+| `dc` | `powerMeter` | DC power straight off the solar panels, before inversion |
 
 ## Inverter operating status
 

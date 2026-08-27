@@ -1,4 +1,4 @@
-name: solaredge-inverter.v4
+name: solaredge-inverter.v5
 components:
   - id: main
     capabilities:
@@ -20,6 +20,15 @@ components:
       - id: powerMeter
         version: 1
       - id: aboutisland47519.gridEnergy
+        version: 1
+    categories:
+      - name: SolarPanel
+  - id: dc
+    label: "DC Input"
+    capabilities:
+      - id: voltageMeasurement
+        version: 1
+      - id: powerMeter
         version: 1
     categories:
       - name: SolarPanel
