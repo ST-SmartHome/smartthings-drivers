@@ -60,6 +60,8 @@ query first (see `BafClient.commit_and_verify_more`).
 | 2 | `model` | string | ALL | Hardware model string (e.g. "Haiku H/I Series") |
 | 7 | `firmware_version` | string | ALL | e.g. "3.3.7" |
 | 8 | `mac_address` | string | ALL | Fan's MAC address |
+| 9 | `uuid9` | string | ALL | A device identity UUID — present in the public reference schema, purpose vs. `dns_sd_uuid` not documented anywhere |
+| 10 | `dns_sd_uuid` | string | ALL | Same UUID published in the fan's mDNS TXT record — confirmed identical via a real probe. This driver currently reads that UUID at the mDNS layer for its DNI, not via this field |
 | 13 | `api_version` | string | ALL | e.g. "8" |
 | 43 | `fan_mode` | enum | FAN | Off/On/Auto |
 | 44 | `reverse_enable` | bool | FAN | Direction (false=forward, true=reverse). Confirmed to apply with unpredictable delay, sometimes minutes — see the direction-control section below |

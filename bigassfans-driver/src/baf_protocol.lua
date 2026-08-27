@@ -54,6 +54,19 @@ baf.FIELDS = {
   model            = { no = 2,  kind = "string", category = "ALL" },
   firmware_version = { no = 7,  kind = "string", category = "ALL" },
   mac_address      = { no = 8,  kind = "string", category = "ALL" },
+  -- uuid9/dns_sd_uuid: present in the public jfroy/aiobafi6 reference
+  -- schema but never previously modeled here. dns_sd_uuid is the same
+  -- uuid discovery_mdns.lua already reads from the fan's mDNS TXT record
+  -- to build a stable DNI -- confirmed identical via a real probe (field
+  -- 10's value matched a real fan's DNI-embedded uuid exactly). Modeling
+  -- it here means a future feature could cross-check "is this the fan I
+  -- think it is" over the protocol connection itself, without depending
+  -- on mDNS still being reachable at read time -- not used for that yet,
+  -- just available. uuid9's exact purpose vs. dns_sd_uuid isn't explained
+  -- anywhere in the reference schema; both are real, distinct UUID
+  -- strings on a live fan, not the same value as each other.
+  uuid9            = { no = 9,  kind = "string", category = "ALL" },
+  dns_sd_uuid      = { no = 10, kind = "string", category = "ALL" },
   api_version      = { no = 13, kind = "string", category = "ALL" },
 
   -- FAN
@@ -85,6 +98,15 @@ baf.FIELDS = {
   led_indicators_enable   = { no = 134, kind = "bool", category = "MORE_PUSH" },
   fan_beep_enable         = { no = 135, kind = "bool", category = "MORE_PUSH" },
   legacy_ir_remote_enable = { no = 136, kind = "bool", category = "MORE_PUSH" },
+
+  -- Sleep Mode master enable — same MORE_PUSH mechanism as the three
+  -- fields above (never returned by a direct category query, only ever
+  -- seen via the fan's unsolicited push after a commit). A cluster of
+  -- other fields (100/101/110/111/112) showed up alongside this one in
+  -- the same push burst and are suspected to be Sleep's other
+  -- sub-settings (fan/light preset, Wake Up behavior) but are NOT
+  -- individually confirmed — deliberately not added here until they are.
+  sleep_mode_enable = { no = 98, kind = "bool", category = "MORE_PUSH" },
 }
 
 local FIELD_BY_NO = {}
