@@ -20,9 +20,7 @@ against the real devices.
 
 ## Protocol details (confirmed empirically against two real fans, not from docs alone)
 
-- **Transport**: plain TCP to port 31415, one connection per request
-  (matches the "one-connection-per-request" pattern already used by the
-  Tuya and Modbus clients in the sibling drivers).
+- **Transport**: plain TCP to port 31415, one connection per request.
 - **Framing**: SLIP (RFC 1055) — `0xC0` start/end delimiters, `0xDB`
   escape sequences for literal `0xC0`/`0xDB` bytes in the payload.
 - **Payload**: proto2 protobuf, `Root{ root2: Root2{ query | commit } }`.
