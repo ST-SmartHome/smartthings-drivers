@@ -1,4 +1,4 @@
-name: bigassfans-h-no-light-no-addfan.v3
+name: bigassfans-h-no-light-no-addfan.v4
 components:
   - id: main
     label: "Fan"
@@ -35,6 +35,29 @@ components:
       - id: aboutisland47519.legacyIrRemote
         version: 1
       - id: temperatureMeasurement
+        version: 1
+  - id: sleep
+    label: "Sleep"
+    capabilities:
+      - id: aboutisland47519.sleepAutoMode
+        version: 1
+      - id: aboutisland47519.sleepIdealTemperature
+        version: 1
+      - id: aboutisland47519.sleepTimer
+        version: 1
+      - id: aboutisland47519.sleepTimerDuration
+        version: 1
+      - id: aboutisland47519.sleepReturnToAuto
+        version: 1
+      - id: aboutisland47519.sleepReturnToAutoDuration
+        version: 1
+      - id: aboutisland47519.sleepBrightnessMode
+        version: 1
+      - id: aboutisland47519.wakeUpMode
+        version: 1
+      - id: aboutisland47519.wakeUpBrightness
+        version: 1
+      - id: aboutisland47519.wakeUpMotionTimeout
         version: 1
 preferences:
   - title: "Manual IP Override"

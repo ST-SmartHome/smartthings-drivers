@@ -86,12 +86,15 @@ baf.FIELDS = {
   light_brightness_percent = { no = 69, kind = "int",  category = "LIGHT", default = 0 },
 
   -- SENSORS — never swept before 2026-08-27. `temperature_raw` is scaled
-  -- ×100 (raw 3170 == 31.70°C) — confirmed against a real independent
-  -- weather station at the same location, not just guessed. `humidity`
-  -- (field 87) deliberately NOT modeled here — it consistently reads a
-  -- suspiciously round 100000 on both fans, matching `hasHumiditySensor:
-  -- false` already confirmed via the capabilities blob (field 17) — this
-  -- looks like a "not populated" sentinel, not a real reading.
+  -- ×100 (raw 3170 == 31.70°C) — confirmed via a separate independent
+  -- weather station reading, not just guessed: fan read 31.7°C, weather
+  -- station read 32.9°C at the same moment, accepted as close enough for
+  -- a different-but-nearby location.
+  -- `humidity` (field 87) deliberately NOT modeled here — it consistently
+  -- reads a suspiciously round 100000 on both fans, matching
+  -- `hasHumiditySensor: false` already confirmed via the capabilities
+  -- blob (field 17) -- this looks like a "not populated" sentinel, not a
+  -- real reading, and both fans agree, so it's not being treated as one.
   temperature_raw = { no = 86, kind = "int", category = "SENSORS", default = 0 },
 
   -- MORE — confirmed 2026-08-26 via a real packet capture of the official
@@ -108,14 +111,36 @@ baf.FIELDS = {
   fan_beep_enable         = { no = 135, kind = "bool", category = "MORE_PUSH" },
   legacy_ir_remote_enable = { no = 136, kind = "bool", category = "MORE_PUSH" },
 
-  -- Sleep Mode master enable — same MORE_PUSH mechanism as the three
-  -- fields above (never returned by a direct category query, only ever
-  -- seen via the fan's unsolicited push after a commit). A cluster of
+  -- Sleep Mode master enable, confirmed 2026-08-26 the same way as the
+  -- three MORE fields above (never returned by a direct category query,
+  -- only ever seen via the fan's unsolicited push after a commit — same
+  -- BafClient.commit_and_verify_more path, reused as-is). A cluster of
   -- other fields (100/101/110/111/112) showed up alongside this one in
   -- the same push burst and are suspected to be Sleep's other
   -- sub-settings (fan/light preset, Wake Up behavior) but are NOT
   -- individually confirmed — deliberately not added here until they are.
   sleep_mode_enable = { no = 98, kind = "bool", category = "MORE_PUSH" },
+
+  -- Sleep/Wake Up sub-settings, confirmed 2026-08-27 via a 3rd packet
+  -- capture — UNLIKE the MORE_PUSH cluster above, these ARE reachable via
+  -- a direct category query (confirmed against all 7 categories with the
+  -- probe): the fan-side fields live under FAN, the light-side ones under
+  -- LIGHT. Field meanings confirmed by matching a specific committed
+  -- value to a specific real UI action, then cross-checked against real
+  -- app screenshots (which corrected two guesses from the pcap-only
+  -- decode — see project-status memory for the full writeup). Two
+  -- adjacent fields (101/111, "Min/Max Speed" on the real Auto screen)
+  -- were deliberately left unmodeled — never independently isolated.
+  sleep_fan_mode              = { no = 100, kind = "enum", category = "FAN",   default = 2 },   -- Off/On/Auto
+  sleep_ideal_temp            = { no = 102, kind = "int",  category = "FAN",   default = 2050 }, -- x100 C
+  sleep_timer_enable          = { no = 110, kind = "bool", category = "FAN",   default = false },
+  sleep_timer_duration        = { no = 112, kind = "int",  category = "FAN",   default = 300 },  -- seconds
+  sleep_return_to_auto        = { no = 129, kind = "bool", category = "FAN",   default = false },
+  sleep_return_to_auto_secs   = { no = 130, kind = "int",  category = "FAN",   default = 7200 },
+  sleep_brightness_mode       = { no = 103, kind = "enum", category = "LIGHT", default = 2 },   -- Off/Dim/Auto
+  wake_up_mode                = { no = 107, kind = "enum", category = "LIGHT", default = 0 },   -- Off/Auto/On
+  wake_up_brightness          = { no = 108, kind = "int",  category = "LIGHT", default = 0 },   -- percent
+  wake_up_motion_timeout_secs = { no = 128, kind = "int",  category = "LIGHT", default = 600 },
 }
 
 local FIELD_BY_NO = {}
@@ -137,13 +162,14 @@ end
 --- using the same names as baf.FIELDS; booleans as true/false, enums/ints
 --- as their integer value. Returns raw protobuf bytes.
 -- Field order within a single commit is NOT cosmetic: confirmed live against
--- real hardware that this fan's firmware silently drops a speed change if
--- the speed field is written before the fan_mode field in the same commit
--- message, even though the two are semantically independent and fan_mode's
--- value wasn't even changing. Lua's pairs() gives no ordering guarantee
--- over the props table, and depending on the runtime it can consistently
--- land in the bad order -- a commit built that way fails every time, never
--- logged as an error because the write succeeds at the socket level; only
+-- real hardware 2026-08-27 that this fan's firmware silently drops a speed
+-- change if the speed field (46) is written before the fan_mode field (43)
+-- in the same commit message, even though the two are semantically
+-- independent and fan_mode's value wasn't even changing. Lua's pairs()
+-- gives no ordering guarantee over the props table, and for this runtime it
+-- was consistently landing in the bad (speed-first) order -- every
+-- SmartThings-issued setFanSpeed silently failed as a result, never logged
+-- as an error because the commit itself succeeds at the socket level; only
 -- the fan's own interpretation of it is order-sensitive. Sorting by field
 -- number here makes every caller's commit byte-order deterministic and
 -- matches the one order confirmed to work, regardless of what order the
@@ -197,13 +223,12 @@ end
 --- Building block for BafClient.query_multi's content-based response
 --- matching (2026-08-27) — a frame is identified by which fields it
 --- actually contains, not by assuming it answers whichever query was
---- sent in the same position. A real off-by-one response lag was found
---- in the fan's back-to-back-query behavior on one connection — the Nth
---- frame read does not reliably correspond to the Nth category queried,
---- for N >= 2. Confirmed against the real deployed code; affects the
---- already-shipped FAN+LIGHT poll too, not just a new addition — masked
---- there because verify_commit re-queries a single category alone after
---- every command, which isn't affected (nothing to lag into).
+--- sent in the same position. See project-status memory for why: a real
+--- off-by-one response lag was found in the fan's back-to-back-query
+--- behavior on one connection (confirmed against the real deployed code,
+--- affects the already-shipped FAN+LIGHT poll too, not just a new
+--- addition) — the Nth frame read does not reliably correspond to the
+--- Nth category queried, for N >= 2.
 function baf.parse_frame_fields(payload)
   local root_fields = pb.parse_fields(payload)
   local root2_bytes = pb.last(root_fields, 2)
