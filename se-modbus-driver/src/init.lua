@@ -59,6 +59,16 @@ local function poll_once(driver, device)
     -- reading.temp_c == nil means all four temperature slots are unpopulated
     -- on this device (already logged in solaredge.lua) — nothing to emit.
 
+    -- DC voltage/power come off the same inverter model registers as
+    -- power_w/energy_wh above, so they're always present whenever a
+    -- reading succeeds at all -- no optional-hardware guard needed here,
+    -- unlike the grid meter below.
+    local dc = device.profile.components.dc
+    if dc then
+      device:emit_component_event(dc, capabilities.voltageMeasurement.voltage({ value = reading.dc_voltage, unit = "V" }))
+      device:emit_component_event(dc, capabilities.powerMeter.power({ value = reading.dc_power_w, unit = "W" }))
+    end
+
     -- Grid meter is optional hardware — nil means this installation doesn't
     -- have one wired up (or it wasn't readable this cycle), not an error.
     local grid = device.profile.components.grid
@@ -99,15 +109,16 @@ local function start_polling(driver, device)
     settings.ip, settings.port, settings.poll_interval))
 end
 
-local CURRENT_PROFILE = "solaredge-inverter.v4"
+local CURRENT_PROFILE = "solaredge-inverter.v5"
 
 local function device_init(driver, device)
   log.info("SolarEdge device init (profile migration check): " .. device.id)
   -- Migrate devices provisioned under an older profile name (e.g. adding
-  -- inverterStatus required bumping v1 -> v2, since a profile's detailView
-  -- layout is generated once at profile-creation time and doesn't
-  -- regenerate just because the same-named profile's capability list
-  -- changes on a later repackage).
+  -- inverterStatus required bumping v1 -> v2, adding the dc component for
+  -- DC voltage/power required bumping v4 -> v5, since a profile's
+  -- detailView layout is generated once at profile-creation time and
+  -- doesn't regenerate just because the same-named profile's capability
+  -- list changes on a later repackage).
   if device.profile.id ~= CURRENT_PROFILE then
     log.info("SolarEdge migrating device from profile " .. tostring(device.profile.id) .. " to " .. CURRENT_PROFILE)
     device:try_update_metadata({ profile = CURRENT_PROFILE })
