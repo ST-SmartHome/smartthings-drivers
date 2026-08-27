@@ -21,14 +21,19 @@ components:
         version: 1
       - id: examplens.ecoMode
         version: 1
+      - id: examplens.sleepMode
+        version: 1
+    categories:
+      - name: Fan
+  - id: settings
+    label: "Settings"
+    capabilities:
       - id: examplens.ledIndicators
         version: 1
       - id: examplens.fanBeep
         version: 1
       - id: examplens.legacyIrRemote
         version: 1
-    categories:
-      - name: Fan
 preferences:
   - title: "Manual IP Override"
     name: ipAddress
