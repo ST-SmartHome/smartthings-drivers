@@ -2,8 +2,7 @@
 
 LAN Edge Driver for Big Ass Fans Haiku H/I Series ceiling fans, controlling
 them over their local "i6" protocol (SLIP-framed protobuf over TCP, port
-31415) — no cloud dependency, no authentication of any kind. Sibling
-project to `../skyfan-driver` and `../se-modbus-driver`.
+31415) — no cloud dependency, no authentication of any kind.
 
 ## Status: working end-to-end
 
@@ -18,30 +17,6 @@ firmware 3.3.7, api_version 8) were auto-discovered via mDNS on the first
 scan and confirmed fully working: every capability (fan switch/speed/mode/
 direction/whoosh/eco, light switch/brightness) reads and writes correctly
 against the real devices.
-
-## Why this driver looks different from skyfan-driver
-
-Two protocol-level facts drove very different design choices from the
-sibling Tuya driver:
-
-1. **The protocol is completely unauthenticated.** No local_key, no
-   device ID pairing — anyone who can reach the fan's IP on port 31415 can
-   query and control it. This means no per-device secrets ever need to be
-   entered by hand.
-2. **The fan advertises itself over real mDNS** (`_api._tcp.local.`,
-   confirmed via reading `aiobafi6`'s own discovery source), which
-   SmartThings Edge Drivers have native platform support for
-   (`st.mdns`, `search-parameters.yml`). Tuya's local broadcast, by
-   contrast, is a proprietary format on a proprietary port that
-   SmartThings' discovery-gating doesn't understand at all — that's why
-   the Skyfan driver needs a manual "Add another fan" button as its
-   *only* way to add more than one device, while this driver auto-creates
-   a device for every fan it finds, with no user action required, and
-   keeps finding new ones for as long as the driver runs.
-
-The combination means this driver needs **zero manual configuration** for
-the common case — no IP to type in, no key to paste. Compare to Skyfan,
-where both are unavoidably manual.
 
 ## Protocol details (confirmed empirically against two real fans, not from docs alone)
 
@@ -90,7 +65,8 @@ where both are unavoidably manual.
     either, per direct confirmation from the fans' owner.
   - `management` — `aboutisland47519.addAnotherFan`, the same custom
     capability (and already-correct presentation) reused from
-    `skyfan-driver` — capability IDs are account-wide, not per-driver.
+    another driver in this workspace — capability IDs are account-wide,
+    not per-driver.
   - One preference: "Manual IP Override" (`ipAddress`, sentinel
     `0.0.0.0` meaning "use the mDNS-discovered address"), plus
     `pollInterval`. No secrets to enter — see protocol notes above.
@@ -126,8 +102,8 @@ parsing, the TCP client's byte-by-byte frame reader) was unit-tested
 against **real bytes captured from the actual fans** using a Lua 5.4
 interpreter extracted locally via `apt-get download lua5.4 liblua5.4-0` +
 `dpkg-deb -x` (no root needed) — before any of it was ever packaged or
-deployed to the hub. This is a different, cheaper development loop than
-`skyfan-driver` used, which iterated live against the hub via `logcat`
+deployed to the hub. This is a different, cheaper development loop than earlier drivers in
+this workspace used, which iterated live against the hub via `logcat`
 from early on. Worth reusing for future protocol-heavy drivers: get a
 local interpreter, capture real traffic with a throwaway Python probe
 script, and unit-test the Lua wire-format code against it directly.
