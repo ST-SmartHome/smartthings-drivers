@@ -9,11 +9,11 @@ them over their local "i6" protocol (SLIP-framed protobuf over TCP, port
 Deployed as `bigassfans-i6-lan`, driverId
 `e39b708d-4db9-4c7b-a76c-0d04e5fdcdd9`, channel `Drivers`
 (`781ea3f1-a95c-492f-9952-59ef19f43505`), hub
-`c215e4a2-98e7-4272-9cd8-ebf178079631` — same channel/hub as the
-household's other drivers. Current profile: `bigassfans-h.v1`.
+`c215e4a2-98e7-4272-9cd8-ebf178079631` — same channel/hub as
+other drivers in this account. Current profile: `bigassfans-h.v1`.
 
-Both known fans (Kitchen, Dining Room — model "Haiku H/I Series",
-firmware 3.3.7, api_version 8) were auto-discovered via mDNS on the first
+Both known fans (same model "Haiku H/I Series", firmware 3.3.7,
+api_version 8) were auto-discovered via mDNS on the first
 scan and confirmed fully working: every capability (fan switch/speed/mode/
 direction/whoosh/eco, light switch/brightness) reads and writes correctly
 against the real devices.
@@ -84,9 +84,10 @@ against the real devices.
   "Manual IP Override" value, which always wins). Also exposes
   `create_another` for the manual-fallback button.
 - `src/init.lua` — lifecycle handlers, all capability command handlers,
-  polling (queries `FAN` then `LIGHT` each cycle, wrapped in `pcall` — see
-  `smartthings-edge-driver-gotchas` memory for why that matters more than
-  it looks).
+  polling (queries `FAN` then `LIGHT` each cycle, wrapped in `pcall` — an
+  uncaught error here would otherwise stop the recurring poll timer from
+  ever registering, silently killing polling for good, not just for one
+  cycle).
 
 ## Development approach: verify offline before touching the hub
 
@@ -103,9 +104,9 @@ script, and unit-test the Lua wire-format code against it directly.
 
 ## Known open items
 
-- Only tested against two fans (Kitchen, Dining Room), both the same
-  model/firmware. Behavior on other Haiku/i6 models (e.g. ones without a
-  light kit) is unconfirmed.
+- Only tested against two real fans, both the same model/firmware.
+  Behavior on other Haiku/i6 models (e.g. ones without a light kit) is
+  unconfirmed.
 - `setFanSpeed` also sets `fan_mode` (nonzero speed → ON, zero → OFF) —
   a UX judgment call, not a confirmed device behavior. The protocol keeps
   `speed` and `fan_mode` as genuinely separate properties; whether the
@@ -116,8 +117,9 @@ script, and unit-test the Lua wire-format code against it directly.
   (e.g. field 207) are silently ignored — likely properties added by
   firmware newer than the library's schema capture, harmless to ignore
   for this driver's scope.
-- mDNS reflection across VLANs depends on the UniFi site's "Multicast
-  DNS" setting — confirmed enabled network-wide in this household's
-  config, but not empirically tested with a fan actually segmented onto a
-  different VLAN from the hub (both current fans are on the same network
-  as each other and, presumably, the hub).
+- mDNS reflection across VLANs depends on the network's "Multicast DNS"
+  setting (a UniFi-specific term, may vary by router/controller) —
+  confirmed enabled network-wide on the network this was tested on, but
+  not empirically tested with a fan actually segmented onto a different
+  VLAN from the hub (both fans tested are on the same network as each
+  other and, presumably, the hub).
