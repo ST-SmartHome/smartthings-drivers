@@ -62,11 +62,9 @@ reading):
 SolarEdge reading: <W>W, <Wh> lifetime, <V> DC, <W> DC, <°C>, status=MPPT
 ```
 
-Deployed as `se-modbus-v4`, driverId `<driver-id>`,
-channel `Drivers` (`<channel-id>`), installed on hub
-`<hub-id>`. Device: "SolarEdge Inverter"
-(`<device-id>`), preferences set to
-`192.168.1.100:1502` (placeholder — real LAN IP set per-install), unit id `1`, 30s poll interval.
+Deployed as `se-modbus-v4`. Device preferences take an IP:port
+(sentinel `192.168.1.100:1502` — real LAN IP set per-install), Modbus
+unit ID (typically `1`), and poll interval (30s by default).
 
 ### What shows up in the SmartThings app
 
