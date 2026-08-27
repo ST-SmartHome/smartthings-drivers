@@ -4,6 +4,8 @@ LAN Edge Driver for Big Ass Fans Haiku H/I Series ceiling fans, controlling
 them over their local "i6" protocol (SLIP-framed protobuf over TCP, port
 31415) — no cloud dependency, no authentication of any kind.
 
+SmartThings Community post: https://community.smartthings.com/t/st-edge-driver-big-a-fans-haiku-h-i-series-via-local-i6-protocol/310526
+
 ## Status: working end-to-end
 
 Deployed as `bigassfans-i6-lan`, driverId
