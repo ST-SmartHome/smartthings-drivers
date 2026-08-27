@@ -432,9 +432,9 @@ local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v1"
 -- (a profile's preference set is part of its identity, same as it was
 -- for the no-light variants below on 2026-08-22) — the values below are
 -- current as of the automatic-light-child deploy. WITH_ADDFAN_PROFILE_ID
--- and NO_LIGHT_PROFILE_ID are nil rather than stale: neither of this
--- household's two fans currently uses either variant (both have
--- hideAddFan=true, and both now have a light-child), so there's no live
+-- and NO_LIGHT_PROFILE_ID are nil rather than stale: neither fan tested
+-- against currently uses either variant (both have hideAddFan=true, and
+-- both now have a light-child), so there's no live
 -- device to confirm a real value from — a stale-but-plausible UUID would
 -- be worse than an honest nil here (ensure_correct_profile always
 -- attempts a switch when it doesn't match, which is harmless while
