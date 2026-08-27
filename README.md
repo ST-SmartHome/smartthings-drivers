@@ -12,5 +12,4 @@ cloud dependency once set up.
   Series ceiling fans, over their local "i6" protocol, mDNS
   auto-discovered.
 
-Each has its own `README.md` (technical details, setup) and
-`FORUM_POST.md` (the SmartThings Community write-up for that driver).
+Each has its own `README.md` (technical details, setup).
