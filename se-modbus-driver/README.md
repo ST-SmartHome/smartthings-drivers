@@ -1,34 +1,18 @@
 # se-modbus-v4
 
-Fresh rebuild of the SolarEdge → SmartThings LAN Edge Driver, after the
-previous project (`se-modbus-v2`/`se-modbus-v3`) was wiped locally. The
-packaged `se-modbus-v3` driver still exists in the SmartThings developer
-account (driverId `1fcf8e8e-de05-4ae6-8a7d-a2cc860d5f96`, channel `Drivers`)
-and is installed on the hub — this rebuild is a replacement, not a patch of
-that package.
+LAN Edge Driver for a SolarEdge inverter, controlling it over local Modbus
+TCP (SunSpec) rather than through SolarEdge's cloud API — no cloud
+dependency once set up.
 
-## What changed vs. the previous version
-
-The previous version had two separate bugs, found in order:
-
-1. **Missing `discovery: {}` permission** in `config.yml` — fixed in
-   `se-modbus-v3`, confirmed present in the packaged version still on the
-   hub.
-2. **Discovery gated on SSDP via `search-parameters.yml`** — the hub only
-   ran the driver's discovery code when it saw SSDP traffic matching the
-   configured search term. SolarEdge's Modbus TCP service never sends SSDP
-   (or any broadcast) — it's a passive server that "waits for a client to
-   connect." So the driver was never invoked at all. Confirmed via a live
-   `logcat` capture during an actual "Add Device" attempt: zero log lines,
-   not even an error — the code path was never reached.
-
-This rebuild fixes #2 architecturally: there is no `search-parameters.yml`
-at all. `discovery.lua` creates exactly one device unconditionally whenever
-discovery runs (i.e. whenever "Scan Nearby" is triggered), with a
-placeholder network ID. The real IP/port/unit ID are then entered by hand as
-device **preferences** after the device is created — see
-`profiles/solaredge-inverter.yml`. `init.lua`'s `infoChanged` handler picks
-up preference changes and (re)starts polling against the configured address.
+**Discovery**: SolarEdge's Modbus TCP service is a passive server with no
+broadcast/SSDP announcement of its own, so this driver doesn't gate
+discovery on any network signal — `discovery.lua` creates exactly one
+device unconditionally whenever discovery runs (i.e. whenever "Scan
+Nearby" is triggered), with a placeholder network ID. The real IP/port/
+unit ID are then entered by hand as device **preferences** after the
+device is created — see `profiles/solaredge-inverter.yml`. `init.lua`'s
+`infoChanged` handler picks up preference changes and (re)starts polling
+against the configured address.
 
 ## Grid import/export meter (optional hardware)
 
@@ -127,10 +111,6 @@ better to skip and log a bad reading than repeat that.
 - **Single Modbus connection at a time**: if anything else (Home Assistant,
   etc.) polls this inverter's Modbus TCP service, this driver's connection
   attempts will conflict with it.
-- The `SolarEdge Modbus` (`solaredge-modbus-tcp`) and `se-modbus-v3`
-  packages from the earlier attempt are still registered in the account and
-  installed on the hub — worth deleting once you're confident `se-modbus-v4`
-  is stable, so there aren't three near-duplicate drivers lying around.
 
 ## Useful commands
 
