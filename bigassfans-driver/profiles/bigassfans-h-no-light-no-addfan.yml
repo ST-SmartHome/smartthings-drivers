@@ -1,4 +1,4 @@
-name: bigassfans-h-no-light-no-addfan.v3
+name: bigassfans-h-no-light-no-addfan.v4
 components:
   - id: main
     label: "Fan"
@@ -35,6 +35,29 @@ components:
       - id: examplens.legacyIrRemote
         version: 1
       - id: temperatureMeasurement
+        version: 1
+  - id: sleep
+    label: "Sleep"
+    capabilities:
+      - id: examplens.sleepAutoMode
+        version: 1
+      - id: examplens.sleepIdealTemperature
+        version: 1
+      - id: examplens.sleepTimer
+        version: 1
+      - id: examplens.sleepTimerDuration
+        version: 1
+      - id: examplens.sleepReturnToAuto
+        version: 1
+      - id: examplens.sleepReturnToAutoDuration
+        version: 1
+      - id: examplens.sleepBrightnessMode
+        version: 1
+      - id: examplens.wakeUpMode
+        version: 1
+      - id: examplens.wakeUpBrightness
+        version: 1
+      - id: examplens.wakeUpMotionTimeout
         version: 1
 preferences:
   - title: "Manual IP Override"

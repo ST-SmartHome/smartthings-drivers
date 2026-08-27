@@ -8,11 +8,9 @@ SmartThings Community post: https://community.smartthings.com/t/st-edge-driver-b
 
 ## Status: working end-to-end
 
-Deployed as `bigassfans-i6-lan`, driverId
-`<driver-id>`, channel `Drivers`
-(`<channel-id>`), hub
-`<hub-id>` — same channel/hub as
-other drivers in this account. Current profile: `bigassfans-h.v1`.
+Deployed as `bigassfans-i6-lan`, distributed via a SmartThings channel
+invite (see the Community thread above) — same channel as this account's
+other drivers.
 
 Both known fans (same model "Haiku H/I Series", firmware 3.3.7,
 api_version 8) were auto-discovered via mDNS on the first
