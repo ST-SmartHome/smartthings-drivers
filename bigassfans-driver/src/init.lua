@@ -15,6 +15,7 @@ local ECO_CAP = capabilities["aboutisland47519.ecoMode"]
 local LED_INDICATORS_CAP = capabilities["aboutisland47519.ledIndicators"]
 local FAN_BEEP_CAP = capabilities["aboutisland47519.fanBeep"]
 local LEGACY_IR_REMOTE_CAP = capabilities["aboutisland47519.legacyIrRemote"]
+local SLEEP_MODE_CAP = capabilities["aboutisland47519.sleepMode"]
 local ADD_ANOTHER_CAP = capabilities["aboutisland47519.addAnotherFan"]
 
 local OFF_ON_AUTO_TO_STRING = { [0] = "Off", [1] = "On", [2] = "Auto" }
@@ -358,6 +359,13 @@ local MORE_CAP_EMIT = {
   legacy_ir_remote_enable = function(device, value)
     device:emit_component_event(device.profile.components.settings,
       LEGACY_IR_REMOTE_CAP.legacyIrRemote({ value = value and "On" or "Off" }))
+  end,
+  -- Sleep Mode lives on "main" (a real physical remote button, unlike
+  -- LED/Beep/IR -- placed on the main Fan controls per the user's stated
+  -- rule, not the settings-only component), so plain emit_event (which
+  -- implicitly targets "main") is correct here, unlike the three above.
+  sleep_mode_enable = function(device, value)
+    device:emit_event(SLEEP_MODE_CAP.sleepMode({ value = value and "On" or "Off" }))
   end,
 }
 
@@ -721,6 +729,10 @@ local function set_legacy_ir_remote(driver, device, command)
   send_more_commit(device, "legacy_ir_remote_enable", command.args.legacyIrRemote == "On")
 end
 
+local function set_sleep_mode(driver, device, command)
+  send_more_commit(device, "sleep_mode_enable", command.args.sleepMode == "On")
+end
+
 --- poll_once is a no-op when called directly on a light-child (it has no
 --- polling loop of its own, see poll_once/start_polling above) — so a
 --- refresh command on the child needs redirecting to its parent's
@@ -783,6 +795,9 @@ local baf_driver = Driver("bigassfans-i6-lan", {
     },
     [LEGACY_IR_REMOTE_CAP.ID] = {
       [LEGACY_IR_REMOTE_CAP.commands.setLegacyIrRemote.NAME] = set_legacy_ir_remote,
+    },
+    [SLEEP_MODE_CAP.ID] = {
+      [SLEEP_MODE_CAP.commands.setSleepMode.NAME] = set_sleep_mode,
     },
     [capabilities.refresh.ID] = {
       [capabilities.refresh.commands.refresh.NAME] = refresh_handler,
