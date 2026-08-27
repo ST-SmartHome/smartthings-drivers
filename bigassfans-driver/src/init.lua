@@ -114,6 +114,24 @@ local function apply_fan_status(device, fan)
   device:emit_event(ECO_CAP.eco({ value = fan.eco_enable and "On" or "Off" }))
 end
 
+--- SENSORS category, currently just ambient temperature (field 86 --
+--- humidity/field 87 deliberately not modeled, see baf_protocol.lua).
+--- Scale factor (÷100) confirmed against a real independent weather
+--- station, not just guessed -- see project-status memory for the
+--- verification. Lives on the `settings` component (moved there
+--- 2026-08-27 alongside LED/Beep/IR -- profile bumped to .v3 for the
+--- same detailView-caching reason as every other capability-placement
+--- change in this driver) -- emit_component_event, not plain emit_event,
+--- same reason as MORE_CAP_EMIT below: plain emit_event implicitly
+--- targets "main" and would silently no-op for a capability declared on
+--- a different component. Only the parent fan has physical sensors,
+--- never called for a light-child.
+local function apply_sensor_status(device, sensors)
+  device:emit_component_event(device.profile.components.settings,
+    capabilities.temperatureMeasurement.temperature({
+      value = sensors.temperature_raw / 100.0, unit = "C" }))
+end
+
 --- Handles three cases uniformly: (1) a light-child device — emits
 --- directly on its own (only) "main" component; (2) a not-yet-split
 --- device that still has a `light` component in its active profile —
@@ -162,9 +180,10 @@ local function poll_once(driver, device)
       return
     end
 
-    -- Both categories over one shared connection, not two separate
+    -- All three categories over one shared connection, not separate
     -- connect/close cycles — see BafClient.query_multi for why (2026-08-13
-    -- connection-churn/light-blip finding).
+    -- connection-churn/light-blip finding). SENSORS added 2026-08-27,
+    -- same connection, no extra TCP overhead.
     --
     -- One immediate retry on failure: on a sufficiently lossy Wi-Fi link,
     -- poll_once can fail with "read failed waiting for start delimiter:
@@ -172,10 +191,10 @@ local function poll_once(driver, device)
     -- timeout wouldn't help; a fresh attempt is what actually has a
     -- chance of landing. Not tested against a controlled packet-loss
     -- rig, just live poll cycles — revisit if misses persist after this.
-    local results, err = BafClient.query_multi(ip, { "FAN", "LIGHT" }, 5)
+    local results, err = BafClient.query_multi(ip, { "FAN", "LIGHT", "SENSORS" }, 5)
     if not results then
       log.warn("BAF poll query failed for " .. ip .. " (retrying once): " .. tostring(err))
-      results, err = BafClient.query_multi(ip, { "FAN", "LIGHT" }, 5)
+      results, err = BafClient.query_multi(ip, { "FAN", "LIGHT", "SENSORS" }, 5)
     end
     if not results then
       log.error("BAF poll query failed for " .. ip .. " after retry: " .. tostring(err))
@@ -183,6 +202,9 @@ local function poll_once(driver, device)
     end
     apply_fan_status(device, results.FAN)
     apply_light_status(device, results.LIGHT)
+    if results.SENSORS then
+      apply_sensor_status(device, results.SENSORS)
+    end
 
     -- If a light-child has been created for this fan, push the same
     -- fresh LIGHT data to it too — one poll, two devices updated, still
@@ -429,28 +451,35 @@ end
 -- don't have the light kit fitted. The two pre-existing profile names are
 -- unchanged so no already-deployed device moves unless its preferences
 -- actually change.
-local WITH_ADDFAN_PROFILE = "bigassfans-h.v1"
-local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v1"
-local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v1"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v1"
+-- 2026-08-27: bumped v1 -> v2 to add temperatureMeasurement to `main`,
+-- then v2 -> v3 the same day to move it onto `settings` instead -- same
+-- detailView-caching rule as the earlier inverterStatus (se-modbus-driver)
+-- and skyfanColorTemp (skyfan-driver) bumps: a same-named profile's
+-- cached detailView doesn't regenerate just because its capability list
+-- changed on a later repackage. The v2->v3 profile YAML rename briefly
+-- didn't get mirrored here -- these constants still said v2 for a while,
+-- silently requesting a profile name that no longer existed in the
+-- package, which is why the migration never took effect across several
+-- redeploys and even a hub reboot. Real lesson: a profile-name bump has
+-- TWO places that must move together, the YAML file's own `name:` and
+-- whatever constant here requests it by name -- treat them as one edit,
+-- never one without the other.
+local WITH_ADDFAN_PROFILE = "bigassfans-h.v3"
+local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v3"
+local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v3"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v3"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
--- 2026-08-25: adding, then later removing, the splitLightDevice
--- preference on these two profiles regenerated their UUIDs each time
--- (a profile's preference set is part of its identity, same as it was
--- for the no-light variants below on 2026-08-22) — the values below are
--- current as of the automatic-light-child deploy. WITH_ADDFAN_PROFILE_ID
--- and NO_LIGHT_PROFILE_ID are nil rather than stale: neither fan tested
--- against currently uses either variant (both have hideAddFan=true, and
--- both now have a light-child), so there's no live
--- device to confirm a real value from — a stale-but-plausible UUID would
--- be worse than an honest nil here (ensure_correct_profile always
+-- All four reset to nil after the 2026-08-27 v2->v3 bump above (a new
+-- profile version gets a new UUID once first created by a real deploy,
+-- so any older UUID would be stale, not current) -- honest nil until
+-- confirmed live again (ensure_correct_profile always
 -- attempts a switch when it doesn't match, which is harmless while
 -- nothing is on that profile).
 local WITH_ADDFAN_PROFILE_ID = nil
-local NO_ADDFAN_PROFILE_ID = "35f1a587-782a-36e4-a4e5-29b16acc3ec7"
+local NO_ADDFAN_PROFILE_ID = nil
 local NO_LIGHT_PROFILE_ID = nil
-local NO_LIGHT_NO_ADDFAN_PROFILE_ID = "3c1f88a6-ea73-3f73-b026-eadfd5701fc7"
+local NO_LIGHT_NO_ADDFAN_PROFILE_ID = nil
 
 local PROFILE_TO_ID = {
   [WITH_ADDFAN_PROFILE] = WITH_ADDFAN_PROFILE_ID,
@@ -729,6 +758,41 @@ local function set_legacy_ir_remote(driver, device, command)
   send_more_commit(device, "legacy_ir_remote_enable", command.args.legacyIrRemote == "On")
 end
 
+-- 2026-08-27: added plain turnOn/turnOff commands (zero args) alongside
+-- the three setXxx(value) commands above, so LED Indicators / Fan Beep /
+-- Legacy IR Remote can render as a native switch toggle instead of a
+-- list-style dropdown -- SmartThings' displayType "switch" needs two
+-- separate zero-arg commands, not one command taking a value. Named
+-- turnOn/turnOff, not on/off -- literal "on"/"off" command names were
+-- rejected by the device command endpoint ("not a valid value") despite
+-- being accepted at capability-definition time, evidently reserved for
+-- the built-in `switch` capability's own contract. The original setXxx
+-- commands are left in place, unused by the current presentation but
+-- harmless to keep.
+local function led_indicators_on(driver, device, command)
+  send_more_commit(device, "led_indicators_enable", true)
+end
+
+local function led_indicators_off(driver, device, command)
+  send_more_commit(device, "led_indicators_enable", false)
+end
+
+local function fan_beep_on(driver, device, command)
+  send_more_commit(device, "fan_beep_enable", true)
+end
+
+local function fan_beep_off(driver, device, command)
+  send_more_commit(device, "fan_beep_enable", false)
+end
+
+local function legacy_ir_remote_on(driver, device, command)
+  send_more_commit(device, "legacy_ir_remote_enable", true)
+end
+
+local function legacy_ir_remote_off(driver, device, command)
+  send_more_commit(device, "legacy_ir_remote_enable", false)
+end
+
 local function set_sleep_mode(driver, device, command)
   send_more_commit(device, "sleep_mode_enable", command.args.sleepMode == "On")
 end
@@ -789,12 +853,18 @@ local baf_driver = Driver("bigassfans-i6-lan", {
     },
     [LED_INDICATORS_CAP.ID] = {
       [LED_INDICATORS_CAP.commands.setLedIndicators.NAME] = set_led_indicators,
+      ["turnOn"] = led_indicators_on,
+      ["turnOff"] = led_indicators_off,
     },
     [FAN_BEEP_CAP.ID] = {
       [FAN_BEEP_CAP.commands.setFanBeep.NAME] = set_fan_beep,
+      ["turnOn"] = fan_beep_on,
+      ["turnOff"] = fan_beep_off,
     },
     [LEGACY_IR_REMOTE_CAP.ID] = {
       [LEGACY_IR_REMOTE_CAP.commands.setLegacyIrRemote.NAME] = set_legacy_ir_remote,
+      ["turnOn"] = legacy_ir_remote_on,
+      ["turnOff"] = legacy_ir_remote_off,
     },
     [SLEEP_MODE_CAP.ID] = {
       [SLEEP_MODE_CAP.commands.setSleepMode.NAME] = set_sleep_mode,

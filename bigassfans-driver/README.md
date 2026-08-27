@@ -98,17 +98,28 @@ items.
 - `search-parameters.yml` — gates the hub's pre-scan on the `_api._tcp`
   mDNS service, so `discovery_handler` only fires when something matching
   is actually present.
-- `profiles/bigassfans-h.yml` — three components:
+- `profiles/bigassfans-h.yml` — four components:
   - `main` — `switch`, `fanSpeed` (native range 0–7, not a percentage),
-    `refresh`, and three custom capabilities: `fanMode` (Off/On/Auto),
+    `refresh`, and custom capabilities: `fanMode` (Off/On/Auto),
     `fanDirection` (Forward/Reverse), `whoosh` (Off/On), `ecoMode`
-    (Off/On).
+    (Off/On), `sleepMode` (Off/On — a real physical remote button,
+    placed on the main controls rather than `settings`).
   - `light` — `switch`, `switchLevel` (0–100%, maps directly to the
     device's own `light_brightness_percent` field, no scaling needed).
   - `management` — `aboutisland47519.addAnotherFan`, the same custom
     capability (and already-correct presentation) reused from
     another driver in this workspace — capability IDs are account-wide,
     not per-driver.
+  - `settings` — one-off configuration toggles rather than everyday
+    controls, rendered as native switch toggles (not the list-style
+    dropdown some of this driver's other custom capabilities use):
+    `ledIndicators`, `fanBeep`, `legacyIrRemote` (Off/On), plus
+    `temperatureMeasurement` (ambient reading, field 86 — see the field
+    table above). A native switch toggle needs two separate zero-arg
+    commands (`turnOn`/`turnOff`), not one command taking a value —
+    these three capabilities carry both the original `setXxx(value)`
+    command and the newer `turnOn`/`turnOff` pair; only the latter is
+    wired to the current presentation.
   - One preference: "Manual IP Override" (`ipAddress`, sentinel
     `0.0.0.0` meaning "use the mDNS-discovered address"), plus
     `pollInterval`. No secrets to enter — see protocol notes above.
@@ -122,7 +133,15 @@ items.
   schema from `aiobafi6.proto`.
 - `src/baf_client.lua` — TCP client: connect, send a SLIP frame, read the
   response frame byte-by-byte until the closing delimiter (SLIP has no
-  length prefix to read ahead by), close.
+  length prefix to read ahead by), close. `query_multi` (multi-category
+  reads) matches each response frame to a category by its actual field
+  content, not by assuming the Nth frame read answers the Nth query sent
+  — a real off-by-one response lag was found in the fan's back-to-back-
+  query behavior on one connection (confirmed against the real deployed
+  code; affected the plain 2-category `FAN`+`LIGHT` poll this driver
+  already shipped, not just a newly-added third category — masked there
+  because the verify-after-command path only ever queries one category
+  alone, which isn't affected).
 - `src/discovery_mdns.lua` — wraps `st.mdns.discover`, decodes TXT
   records, filters for real BAF fans, returns candidates keyed by a DNI
   derived from the fan's own `uuid` TXT record (stable across DHCP IP
@@ -133,10 +152,10 @@ items.
   "Manual IP Override" value, which always wins). Also exposes
   `create_another` for the manual-fallback button.
 - `src/init.lua` — lifecycle handlers, all capability command handlers,
-  polling (queries `FAN` then `LIGHT` each cycle, wrapped in `pcall` — an
-  uncaught error here would otherwise stop the recurring poll timer from
-  ever registering, silently killing polling for good, not just for one
-  cycle).
+  polling (queries `FAN`, `LIGHT`, and `SENSORS` each cycle over one
+  shared connection, wrapped in `pcall` — an uncaught error here would
+  otherwise stop the recurring poll timer from ever registering, silently
+  killing polling for good, not just for one cycle).
 
 ## Development approach: verify offline before touching the hub
 

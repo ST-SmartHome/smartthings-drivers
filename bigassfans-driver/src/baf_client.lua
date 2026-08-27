@@ -87,6 +87,16 @@ end
 --- suspected cause; if reconnects continue at a similar rate after this
 --- ships, the connection count wasn't the (whole) story and the poll
 --- interval itself should be the next thing raised, not lowered further.
+--- Sends every category's query up front, then reads responses back
+--- matched to a category by CONTENT (which known fields a frame actually
+--- contains), not by assuming the Nth frame read answers the Nth query
+--- sent. Found 2026-08-27: the fan's responses to back-to-back queries
+--- on one connection do not reliably arrive in send order once more than
+--- one category is involved — confirmed against the real deployed code,
+--- affects the plain 2-category {"FAN","LIGHT"} call too, not just a
+--- newly-added third category. See baf_protocol.lua's
+--- parse_frame_fields and the project-status memory entry on this for
+--- the full story and how it was confirmed.
 function BafClient.query_multi(ip, category_names, timeout_sec)
   local sock, err = socket.tcp()
   if not sock then
@@ -100,37 +110,87 @@ function BafClient.query_multi(ip, category_names, timeout_sec)
     return nil, "connect failed: " .. tostring(connect_err)
   end
 
-  local results = {}
+  -- Validate every category up front so a typo fails before any I/O.
   for _, category_name in ipairs(category_names) do
-    local category = baf.QUERY_CATEGORY[category_name]
-    if not category then
+    if not baf.QUERY_CATEGORY[category_name] then
       sock:close()
       return nil, "unknown query category '" .. tostring(category_name) .. "'"
     end
+  end
 
-    local message = baf.build_query(category)
+  -- Send every query up front -- see the header comment above for why
+  -- reading is no longer paired one-for-one with sending.
+  for _, category_name in ipairs(category_names) do
+    local message = baf.build_query(baf.QUERY_CATEGORY[category_name])
     local sent, send_err = sock:send(slip.encode(message))
     if not sent then
       sock:close()
       return nil, "send failed for category '" .. category_name .. "': " .. tostring(send_err)
     end
+  end
 
-    local frame, read_err = read_slip_frame(sock)
+  -- Pre-fill defaults per requested category, same as parse_category_result
+  -- always has -- a field genuinely at its zero value can be omitted by
+  -- the fan entirely, in any frame, so "never arrived" and "arrived as
+  -- its default" have to look the same here.
+  local results = {}
+  local wanted = {}
+  for _, category_name in ipairs(category_names) do
+    wanted[category_name] = true
+    local defaults = {}
+    for field_name, def in pairs(baf.FIELDS) do
+      if def.category == category_name and def.default ~= nil then
+        defaults[field_name] = def.default
+      end
+    end
+    results[category_name] = defaults
+  end
+
+  -- Read frames and, for each known field found, credit it to whichever
+  -- requested category that field actually belongs to (baf.FIELDS is the
+  -- source of truth, not the frame's position in the read sequence). A
+  -- category counts as satisfied once at least one of its fields has
+  -- shown up in some frame. Some headroom over category_names' own count
+  -- since a stray/unrelated frame (or a category's response arriving as
+  -- more than one chunk) shouldn't immediately exhaust the budget.
+  local satisfied = {}
+  local satisfied_count = 0
+  local total_wanted = #category_names
+  local max_frames = total_wanted + 4
+  for _ = 1, max_frames do
+    if satisfied_count >= total_wanted then
+      break
+    end
+    local frame = read_slip_frame(sock)
     if not frame then
-      sock:close()
-      return nil, "read failed for category '" .. category_name .. "': " .. tostring(read_err)
+      break -- out of frames or timed out -- stop, evaluate what we got
     end
-
     local payload = slip.decode(frame)
-    local result = baf.parse_category_result(payload, category_name)
-    if not result then
-      sock:close()
-      return nil, "response had no query_result for category '" .. category_name .. "'"
+    local found = baf.parse_frame_fields(payload)
+    if found then
+      for category_name in pairs(wanted) do
+        for field_name, value in pairs(found) do
+          local def = baf.FIELDS[field_name]
+          if def.category == category_name then
+            results[category_name][field_name] = value
+            if not satisfied[category_name] then
+              satisfied[category_name] = true
+              satisfied_count = satisfied_count + 1
+            end
+          end
+        end
+      end
     end
-    results[category_name] = result
   end
 
   sock:close()
+
+  for _, category_name in ipairs(category_names) do
+    if not satisfied[category_name] then
+      return nil, "no response ever matched category '" .. category_name .. "'"
+    end
+  end
+
   return results
 end
 
