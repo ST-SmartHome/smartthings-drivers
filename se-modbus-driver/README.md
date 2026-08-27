@@ -30,19 +30,41 @@ device **preferences** after the device is created — see
 `profiles/solaredge-inverter.yml`. `init.lua`'s `infoChanged` handler picks
 up preference changes and (re)starts polling against the configured address.
 
+## Grid import/export meter (optional hardware)
+
+If your installation has a SolarEdge production/consumption meter attached
+(SunSpec model 201–204 — many residential installs do), the driver reads
+it automatically alongside the inverter, in the same Modbus session, and
+exposes it as a second `grid` component:
+
+- **`powerMeter`** — net grid power, **signed**: negative = importing
+  from the grid, positive = exporting surplus. This already nets out
+  household consumption, so it's the right value to use for a "don't run
+  this unless there's solar surplus" style condition — don't use the
+  inverter's own production figure for that, it doesn't account for what
+  the house itself is drawing.
+- **`aboutisland47519.gridEnergy`** (custom capability) — lifetime
+  exported/imported energy.
+
+No meter present is a normal, fully-supported case — the driver detects
+this at read time and simply omits the `grid` component's readings
+rather than erroring. The `grid` component shows up as its own
+selectable condition in SmartThings Routines, confirmed via the app.
+
 ## Files
 
 - `config.yml` — driver metadata, `lan` + `discovery` permissions.
 - `profiles/solaredge-inverter.yml` — capabilities (powerMeter, energyMeter,
   temperatureMeasurement, refresh) and the IP/port/unitId/pollInterval
-  preferences.
+  preferences. The `grid` component (see above) is declared here too.
 - `src/discovery.lua` — unconditional single-device creation.
 - `src/init.lua` — lifecycle handlers, preference-driven polling loop.
 - `src/modbus.lua` — minimal Modbus TCP client (Read Holding Registers only,
   function code 0x03). Hand-rolled, since the Edge Driver Lua sandbox has no
   Modbus library — uses `cosock.socket` for the raw TCP connection.
 - `src/solaredge.lua` — SunSpec inverter model (101/103) register map and
-  scale-factor math.
+  scale-factor math, plus the optional meter model (201–204) read for the
+  grid import/export figures above.
 
 ## Status: working, verified live (2026-08-03)
 
