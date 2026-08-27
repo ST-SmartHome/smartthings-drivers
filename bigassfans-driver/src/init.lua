@@ -18,8 +18,49 @@ local LEGACY_IR_REMOTE_CAP = capabilities["aboutisland47519.legacyIrRemote"]
 local SLEEP_MODE_CAP = capabilities["aboutisland47519.sleepMode"]
 local ADD_ANOTHER_CAP = capabilities["aboutisland47519.addAnotherFan"]
 
+-- Sleep/Wake Up sub-settings (2026-08-27) -- see baf_protocol.lua for the
+-- field-decode writeup and project-status memory for how each was
+-- confirmed. All read via the normal FAN/LIGHT category poll (these are
+-- directly queryable, unlike sleepMode/ledIndicators/etc above), written
+-- via the normal send_commit/verify_commit path.
+local SLEEP_FAN_MODE_CAP = capabilities["aboutisland47519.sleepAutoMode"]
+local SLEEP_IDEAL_TEMP_CAP = capabilities["aboutisland47519.sleepIdealTemperature"]
+local SLEEP_TIMER_CAP = capabilities["aboutisland47519.sleepTimer"]
+local SLEEP_TIMER_DURATION_CAP = capabilities["aboutisland47519.sleepTimerDuration"]
+local SLEEP_RETURN_TO_AUTO_CAP = capabilities["aboutisland47519.sleepReturnToAuto"]
+local SLEEP_RETURN_TO_AUTO_DURATION_CAP = capabilities["aboutisland47519.sleepReturnToAutoDuration"]
+local SLEEP_BRIGHTNESS_MODE_CAP = capabilities["aboutisland47519.sleepBrightnessMode"]
+local WAKE_UP_MODE_CAP = capabilities["aboutisland47519.wakeUpMode"]
+local WAKE_UP_BRIGHTNESS_CAP = capabilities["aboutisland47519.wakeUpBrightness"]
+local WAKE_UP_MOTION_TIMEOUT_CAP = capabilities["aboutisland47519.wakeUpMotionTimeout"]
+
 local OFF_ON_AUTO_TO_STRING = { [0] = "Off", [1] = "On", [2] = "Auto" }
 local STRING_TO_OFF_ON_AUTO = { Off = 0, On = 1, Auto = 2 }
+
+-- sleep_fan_mode (field 100) shares the same Off/On/Auto order as the
+-- main fan_mode enum -- confirmed via commit->readback round-trips
+-- (committed 0/1/2 each read back identically right after) -- reuse the
+-- same tables, don't duplicate.
+--
+-- sleep_brightness_mode (field 103): "2" = Auto is solidly confirmed
+-- (matches the real app screenshot showing "Auto / 0%" as the current
+-- Sleep light state, and the field's baseline value). The Off/Dim
+-- ordering for 0/1 is NOT independently confirmed the same way -- only
+-- numeric commit->readback round-trips were caught, no textual
+-- before/after narration like wake_up_mode got. If this ever renders
+-- backwards in the app, swap these two rather than assume the whole
+-- field mapping is wrong.
+local STRING_TO_BRIGHTNESS_MODE = { Off = 0, Dim = 1, Auto = 2 }
+local BRIGHTNESS_MODE_TO_STRING = { [0] = "Off", [1] = "Dim", [2] = "Auto" }
+-- wake_up_mode (field 107) turns out to share the SAME Off/On/Auto order
+-- as fan_mode -- confirmed via the commit's own immediate read-back in
+-- the pcap (committed 1 -> read back 1 right after "On"; committed 2 ->
+-- read back 2 right after "Auto"), not just marker-timing proximity. An
+-- earlier pass mis-ordered this as Off/Auto/On from timing alone before
+-- the read-back cross-check was done -- if you're ever re-deriving this,
+-- trust a commit's own read-back over marker timestamps.
+local STRING_TO_WAKE_MODE = STRING_TO_OFF_ON_AUTO
+local WAKE_MODE_TO_STRING = OFF_ON_AUTO_TO_STRING
 
 -- ===== Light child devices (2026-08-25) =====
 --
@@ -119,17 +160,57 @@ end
 --- Scale factor (÷100) confirmed against a real independent weather
 --- station, not just guessed -- see project-status memory for the
 --- verification. Lives on the `settings` component (moved there
---- 2026-08-27 alongside LED/Beep/IR -- profile bumped to .v3 for the
---- same detailView-caching reason as every other capability-placement
---- change in this driver) -- emit_component_event, not plain emit_event,
---- same reason as MORE_CAP_EMIT below: plain emit_event implicitly
---- targets "main" and would silently no-op for a capability declared on
---- a different component. Only the parent fan has physical sensors,
---- never called for a light-child.
+--- 2026-08-27 at the user's request, alongside LED/Beep/IR -- profile
+--- bumped to .v3 for the same detailView-caching reason as every other
+--- capability-placement change in this driver) -- emit_component_event,
+--- not plain emit_event, same reason as MORE_CAP_EMIT below: plain
+--- emit_event implicitly targets "main" and would silently no-op for a
+--- capability declared on a different component. Only the parent fan
+--- has physical sensors, never called for a light-child.
 local function apply_sensor_status(device, sensors)
   device:emit_component_event(device.profile.components.settings,
     capabilities.temperatureMeasurement.temperature({
       value = sensors.temperature_raw / 100.0, unit = "C" }))
+end
+
+--- Sleep/Wake Up sub-settings (2026-08-27). Unlike sensors/LED/Beep/IR,
+--- these fields are directly queryable (FAN and LIGHT categories), so
+--- they arrive on every normal poll_once call already -- no extra query
+--- category needed. Only called for the parent (never a light-child --
+--- these are fan-and-light-shared preset screens that only make sense on
+--- the parent device, same reasoning as apply_sensor_status). fan/light
+--- params are the FAN/LIGHT category results already fetched by the
+--- caller; either may be nil if that category's query failed this cycle,
+--- in which case its half is simply skipped for this emit.
+local function apply_sleep_status(device, fan, light)
+  local sleep_component = device.profile.components.sleep
+  if not sleep_component then
+    return
+  end
+  if fan then
+    device:emit_component_event(sleep_component,
+      SLEEP_FAN_MODE_CAP.sleepFanMode({ value = OFF_ON_AUTO_TO_STRING[fan.sleep_fan_mode] or "Off" }))
+    device:emit_component_event(sleep_component,
+      SLEEP_IDEAL_TEMP_CAP.sleepIdealTemp({ value = fan.sleep_ideal_temp / 100.0, unit = "C" }))
+    device:emit_component_event(sleep_component,
+      SLEEP_TIMER_CAP.sleepTimerEnable({ value = fan.sleep_timer_enable and "On" or "Off" }))
+    device:emit_component_event(sleep_component,
+      SLEEP_TIMER_DURATION_CAP.sleepTimerDuration({ value = math.floor(fan.sleep_timer_duration / 60), unit = "min" }))
+    device:emit_component_event(sleep_component,
+      SLEEP_RETURN_TO_AUTO_CAP.sleepReturnToAuto({ value = fan.sleep_return_to_auto and "On" or "Off" }))
+    device:emit_component_event(sleep_component,
+      SLEEP_RETURN_TO_AUTO_DURATION_CAP.sleepReturnToAutoDuration({ value = math.floor(fan.sleep_return_to_auto_secs / 60), unit = "min" }))
+  end
+  if light then
+    device:emit_component_event(sleep_component,
+      SLEEP_BRIGHTNESS_MODE_CAP.sleepBrightnessMode({ value = BRIGHTNESS_MODE_TO_STRING[light.sleep_brightness_mode] or "Off" }))
+    device:emit_component_event(sleep_component,
+      WAKE_UP_MODE_CAP.wakeUpMode({ value = WAKE_MODE_TO_STRING[light.wake_up_mode] or "Off" }))
+    device:emit_component_event(sleep_component,
+      WAKE_UP_BRIGHTNESS_CAP.wakeUpBrightness({ value = light.wake_up_brightness, unit = "%" }))
+    device:emit_component_event(sleep_component,
+      WAKE_UP_MOTION_TIMEOUT_CAP.wakeUpMotionTimeout({ value = math.floor(light.wake_up_motion_timeout_secs / 60), unit = "min" }))
+  end
 end
 
 --- Handles three cases uniformly: (1) a light-child device — emits
@@ -185,12 +266,17 @@ local function poll_once(driver, device)
     -- connection-churn/light-blip finding). SENSORS added 2026-08-27,
     -- same connection, no extra TCP overhead.
     --
-    -- One immediate retry on failure: on a sufficiently lossy Wi-Fi link,
-    -- poll_once can fail with "read failed waiting for start delimiter:
-    -- timeout" — a lost/delayed response, not a slow one, so a longer
-    -- timeout wouldn't help; a fresh attempt is what actually has a
-    -- chance of landing. Not tested against a controlled packet-loss
-    -- rig, just live poll cycles — revisit if misses persist after this.
+    -- One immediate retry on failure: found 2026-08-22 that on a
+    -- sufficiently lossy Wi-Fi network (a congested 2.4GHz SSID running
+    -- ~40% TX retry rates on both fans, unrelated to this driver)
+    -- poll_once fails with "read failed waiting for start delimiter:
+    -- timeout" on roughly 1-in-5 cycles per fan — a lost/delayed response,
+    -- not a slow one, so a longer timeout wouldn't help; a fresh attempt
+    -- is what actually has a chance of landing. Failures are independent
+    -- enough per-attempt that one retry should drop the effective miss
+    -- rate from ~20% to ~4% (0.2 * 0.2). Not tested against a controlled
+    -- packet-loss rig, just live poll cycles — revisit if misses persist
+    -- after this.
     local results, err = BafClient.query_multi(ip, { "FAN", "LIGHT", "SENSORS" }, 5)
     if not results then
       log.warn("BAF poll query failed for " .. ip .. " (retrying once): " .. tostring(err))
@@ -205,6 +291,7 @@ local function poll_once(driver, device)
     if results.SENSORS then
       apply_sensor_status(device, results.SENSORS)
     end
+    apply_sleep_status(device, results.FAN, results.LIGHT)
 
     -- If a light-child has been created for this fan, push the same
     -- fresh LIGHT data to it too — one poll, two devices updated, still
@@ -253,12 +340,12 @@ end
 local REFRESH_DELAY_SECONDS = 2
 
 -- How many times to (re)send a commit if it doesn't verify as applied.
--- Mirrors the read-path retry above, for the same reason: on a
--- sufficiently lossy Wi-Fi link, BafClient.commit's local sock:send()
--- succeeding only proves the write left this box, not that it reached
--- the fan. Unlike reads, a lost commit produced no error and no retry at
--- all before this fix — the app's toggle would just spin and silently
--- revert to the fan's real (unchanged) state on the next refresh.
+-- Mirrors the read-path retry added 2026-08-22 for the same reason: this
+-- fan's Wi-Fi runs ~40% TX retry rates, and BafClient.commit's local
+-- sock:send() succeeding only proves the write left this box, not that it
+-- reached the fan. Unlike reads, a lost commit produced no error and no
+-- retry at all before this fix — the app's toggle would just spin and
+-- silently revert to the fan's real (unchanged) state on the next refresh.
 local MAX_COMMIT_ATTEMPTS = 2
 
 --- Every send_commit call sets fields from exactly one query category
@@ -296,8 +383,10 @@ end
 local function apply_fan_status_or_light(device, category, result)
   if category == "FAN" then
     apply_fan_status(device, result)
+    apply_sleep_status(device, result, nil)
   elseif category == "LIGHT" then
     apply_light_status(device, result)
+    apply_sleep_status(device, nil, result)
   end
 end
 
@@ -452,28 +541,29 @@ end
 -- unchanged so no already-deployed device moves unless its preferences
 -- actually change.
 -- 2026-08-27: bumped v1 -> v2 to add temperatureMeasurement to `main`,
--- then v2 -> v3 the same day to move it onto `settings` instead -- same
--- detailView-caching rule as the earlier inverterStatus (se-modbus-driver)
--- and skyfanColorTemp (skyfan-driver) bumps: a same-named profile's
--- cached detailView doesn't regenerate just because its capability list
--- changed on a later repackage. The v2->v3 profile YAML rename briefly
--- didn't get mirrored here -- these constants still said v2 for a while,
--- silently requesting a profile name that no longer existed in the
--- package, which is why the migration never took effect across several
--- redeploys and even a hub reboot. Real lesson: a profile-name bump has
--- TWO places that must move together, the YAML file's own `name:` and
--- whatever constant here requests it by name -- treat them as one edit,
--- never one without the other.
-local WITH_ADDFAN_PROFILE = "bigassfans-h.v3"
-local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v3"
-local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v3"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v3"
+-- then v2 -> v3 the same day to move it onto `settings` instead (user
+-- request) -- same detailView-caching rule as the earlier inverterStatus
+-- (se-modbus-driver) and skyfanColorTemp (skyfan-driver) bumps: a
+-- same-named profile's cached detailView doesn't regenerate just because
+-- its capability list changed on a later repackage. The v2->v3 profile
+-- YAML rename briefly didn't get mirrored here -- these constants still
+-- said v2 for a while, silently requesting a profile name that no
+-- longer existed in the package, which is why the migration never took
+-- effect across several redeploys and even a hub reboot. Real lesson:
+-- a profile-name bump has TWO places that must move together, the YAML
+-- file's own `name:` and whatever constant here requests it by name --
+-- treat them as one edit, never one without the other.
+local WITH_ADDFAN_PROFILE = "bigassfans-h.v4"
+local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v4"
+local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v4"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v4"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
 -- All four reset to nil after the 2026-08-27 v2->v3 bump above (a new
 -- profile version gets a new UUID once first created by a real deploy,
--- so any older UUID would be stale, not current) -- honest nil until
--- confirmed live again (ensure_correct_profile always
+-- so any older UUID would be stale, not current) -- honest nil
+-- until confirmed live again, same reasoning as WITH_ADDFAN_PROFILE_ID
+-- already used below (ensure_correct_profile always
 -- attempts a switch when it doesn't match, which is harmless while
 -- nothing is on that profile).
 local WITH_ADDFAN_PROFILE_ID = nil
@@ -533,11 +623,11 @@ local function ensure_correct_profile(driver, device)
 end
 
 --- Automatic for every fan with a physical light — no per-device opt-in
---- anymore. Piloted behind a splitLightDevice preference on one real
---- fan first (created, confirmed mirroring state both directions and
---- controlling the real light, confirmed as its own separate Alexa
---- device) before making it unconditional here for every other fan too,
---- including ones added in the future. Still skipped for
+--- anymore. Piloted behind a splitLightDevice preference on one fan
+--- first (2026-08-25: created, confirmed mirroring state both
+--- directions and controlling the real light, confirmed as its own
+--- separate Alexa device) before making it unconditional here for every
+--- other fan too, including ones added in the future. Still skipped for
 --- a noLight device — nothing to split off if there's no physical light
 --- kit. Idempotent via find_light_child (observed state), so safe to
 --- call on every init. Deliberately does NOT also switch this device's
@@ -659,24 +749,26 @@ local function set_mode(driver, device, command)
   send_commit(driver, device, { fan_mode = value }, true)
 end
 
--- CORRECTED: the "never takes effect" conclusion that removed this
--- handler was wrong — reverse_enable does get committed, just with an
--- unpredictable delay (confirmed when a fan turned up running
--- reverse_enable=true, well after the original short wait-then-verify
--- test looked like it failed). Handler restored. Known real limitation:
--- a command sent here may not visibly apply for some unknown period
--- afterward (minutes, possibly longer) — the app has no way to indicate
--- "pending", so a user re-sending the same command because nothing
--- seemed to happen can end up with both the original and the retry
--- landing unpredictably later. No fix for that currently; just something
--- to keep in mind.
+-- CORRECTED 2026-08-25: the "never takes effect" conclusion that removed
+-- this handler was wrong — reverse_enable does get committed, just with
+-- an unpredictable delay (confirmed when a fan turned up running
+-- reverse_enable=true, well after the original short wait-then-
+-- verify test looked like it failed; see project-status memory for the
+-- full writeup and the incident that caught it). Handler restored.
+-- Known real limitation: a command sent here may not visibly apply for
+-- some unknown period afterward (minutes, possibly longer) — the app
+-- has no way to indicate "pending", so a user re-sending the same
+-- command because nothing seemed to happen can end up with both the
+-- original and the retry landing unpredictably later. No fix for that
+-- currently; just something to keep in mind.
 --
--- Also added a stop-the-fan-first interlock, since this original code
--- committed reverse_enable directly regardless of whether the fan was
--- spinning -- the exact sequence that likely caused the incident above,
--- worked around manually (stop, verify stopped, then flip) via a
--- standalone fix script at the time. That manual sequence is now built
--- into the handler instead of relying on doing it by hand again.
+-- 2026-08-25: added a stop-the-fan-first interlock, since this original
+-- code committed reverse_enable directly regardless of whether the fan
+-- was spinning -- the exact sequence that likely put a fan into reverse
+-- at full speed in the first place, and was worked around
+-- manually (stop, verify stopped, then flip) via the standalone fix
+-- script when that incident was caught. That manual sequence is now
+-- built into the handler instead of relying on doing it by hand again.
 local MAX_STOP_ATTEMPTS = 3
 
 --- Re-queries FAN and, once confirmed stopped (fan_mode OFF and speed 0),
@@ -761,14 +853,14 @@ end
 -- 2026-08-27: added plain turnOn/turnOff commands (zero args) alongside
 -- the three setXxx(value) commands above, so LED Indicators / Fan Beep /
 -- Legacy IR Remote can render as a native switch toggle instead of a
--- list-style dropdown -- SmartThings' displayType "switch" needs two
--- separate zero-arg commands, not one command taking a value. Named
--- turnOn/turnOff, not on/off -- literal "on"/"off" command names were
--- rejected by the device command endpoint ("not a valid value") despite
--- being accepted at capability-definition time, evidently reserved for
--- the built-in `switch` capability's own contract. The original setXxx
--- commands are left in place, unused by the current presentation but
--- harmless to keep.
+-- list-style dropdown (per user request) -- SmartThings' displayType
+-- "switch" needs two separate zero-arg commands, not one command taking
+-- a value. Named turnOn/turnOff, not on/off -- literal "on"/"off" command
+-- names were rejected by the device command endpoint ("not a valid
+-- value") despite being accepted at capability-definition time, evidently
+-- reserved for the built-in `switch` capability's own contract. The
+-- original setXxx commands are left in place, unused by the current
+-- presentation but harmless to keep.
 local function led_indicators_on(driver, device, command)
   send_more_commit(device, "led_indicators_enable", true)
 end
@@ -795,6 +887,69 @@ end
 
 local function set_sleep_mode(driver, device, command)
   send_more_commit(device, "sleep_mode_enable", command.args.sleepMode == "On")
+end
+
+-- Sleep/Wake Up sub-settings (2026-08-27) — all direct-query fields, so
+-- these use the normal send_commit(..., true) path (verify_commit
+-- re-queries the FAN or LIGHT category and calls apply_fan_status_or_light,
+-- which now also calls apply_sleep_status — see above), unlike
+-- send_more_commit's push-read mechanism needed for sleepMode/LED/Beep/IR.
+local function set_sleep_fan_mode(driver, device, command)
+  local value = STRING_TO_OFF_ON_AUTO[command.args.value]
+  if value then
+    send_commit(driver, device, { sleep_fan_mode = value }, true)
+  end
+end
+
+local function set_sleep_ideal_temp(driver, device, command)
+  local value = math.floor(command.args.value * 100 + 0.5)
+  send_commit(driver, device, { sleep_ideal_temp = value }, true)
+end
+
+local function sleep_timer_on(driver, device, command)
+  send_commit(driver, device, { sleep_timer_enable = true }, true)
+end
+
+local function sleep_timer_off(driver, device, command)
+  send_commit(driver, device, { sleep_timer_enable = false }, true)
+end
+
+local function set_sleep_timer_duration(driver, device, command)
+  send_commit(driver, device, { sleep_timer_duration = math.floor(command.args.value * 60) }, true)
+end
+
+local function sleep_return_to_auto_on(driver, device, command)
+  send_commit(driver, device, { sleep_return_to_auto = true }, true)
+end
+
+local function sleep_return_to_auto_off(driver, device, command)
+  send_commit(driver, device, { sleep_return_to_auto = false }, true)
+end
+
+local function set_sleep_return_to_auto_duration(driver, device, command)
+  send_commit(driver, device, { sleep_return_to_auto_secs = math.floor(command.args.value * 60) }, true)
+end
+
+local function set_sleep_brightness_mode(driver, device, command)
+  local value = STRING_TO_BRIGHTNESS_MODE[command.args.value]
+  if value then
+    send_commit(driver, device, { sleep_brightness_mode = value }, true)
+  end
+end
+
+local function set_wake_up_mode(driver, device, command)
+  local value = STRING_TO_WAKE_MODE[command.args.value]
+  if value then
+    send_commit(driver, device, { wake_up_mode = value }, true)
+  end
+end
+
+local function set_wake_up_brightness(driver, device, command)
+  send_commit(driver, device, { wake_up_brightness = math.floor(command.args.value) }, true)
+end
+
+local function set_wake_up_motion_timeout(driver, device, command)
+  send_commit(driver, device, { wake_up_motion_timeout_secs = math.floor(command.args.value * 60) }, true)
 end
 
 --- poll_once is a no-op when called directly on a light-child (it has no
@@ -868,6 +1023,51 @@ local baf_driver = Driver("bigassfans-i6-lan", {
     },
     [SLEEP_MODE_CAP.ID] = {
       [SLEEP_MODE_CAP.commands.setSleepMode.NAME] = set_sleep_mode,
+    },
+    -- Sleep/Wake Up sub-settings (2026-08-27): literal string command
+    -- names throughout, not `.commands.X.NAME` -- these capabilities were
+    -- created moments before this deploy, same capability-definition
+    -- propagation-lag risk that caused a real driver-crashing FATAL
+    -- earlier this session (see project-status memory). Once these have
+    -- survived a redeploy or two, `.commands.X.NAME` would be safe to
+    -- switch to, but there's no benefit to doing so.
+    [SLEEP_FAN_MODE_CAP.ID] = {
+      ["setSleepFanMode"] = set_sleep_fan_mode,
+    },
+    [SLEEP_IDEAL_TEMP_CAP.ID] = {
+      ["setSleepIdealTemp"] = set_sleep_ideal_temp,
+    },
+    [SLEEP_TIMER_CAP.ID] = {
+      ["setSleepTimerEnable"] = function(driver, device, command)
+        send_commit(driver, device, { sleep_timer_enable = command.args.value == "On" }, true)
+      end,
+      ["turnOn"] = sleep_timer_on,
+      ["turnOff"] = sleep_timer_off,
+    },
+    [SLEEP_TIMER_DURATION_CAP.ID] = {
+      ["setSleepTimerDuration"] = set_sleep_timer_duration,
+    },
+    [SLEEP_RETURN_TO_AUTO_CAP.ID] = {
+      ["setSleepReturnToAuto"] = function(driver, device, command)
+        send_commit(driver, device, { sleep_return_to_auto = command.args.value == "On" }, true)
+      end,
+      ["turnOn"] = sleep_return_to_auto_on,
+      ["turnOff"] = sleep_return_to_auto_off,
+    },
+    [SLEEP_RETURN_TO_AUTO_DURATION_CAP.ID] = {
+      ["setSleepReturnToAutoDuration"] = set_sleep_return_to_auto_duration,
+    },
+    [SLEEP_BRIGHTNESS_MODE_CAP.ID] = {
+      ["setSleepBrightnessMode"] = set_sleep_brightness_mode,
+    },
+    [WAKE_UP_MODE_CAP.ID] = {
+      ["setWakeUpMode"] = set_wake_up_mode,
+    },
+    [WAKE_UP_BRIGHTNESS_CAP.ID] = {
+      ["setWakeUpBrightness"] = set_wake_up_brightness,
+    },
+    [WAKE_UP_MOTION_TIMEOUT_CAP.ID] = {
+      ["setWakeUpMotionTimeout"] = set_wake_up_motion_timeout,
     },
     [capabilities.refresh.ID] = {
       [capabilities.refresh.commands.refresh.NAME] = refresh_handler,

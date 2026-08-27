@@ -148,19 +148,27 @@ function BafClient.query_multi(ip, category_names, timeout_sec)
 
   -- Read frames and, for each known field found, credit it to whichever
   -- requested category that field actually belongs to (baf.FIELDS is the
-  -- source of truth, not the frame's position in the read sequence). A
-  -- category counts as satisfied once at least one of its fields has
-  -- shown up in some frame. Some headroom over category_names' own count
-  -- since a stray/unrelated frame (or a category's response arriving as
-  -- more than one chunk) shouldn't immediately exhaust the budget.
+  -- source of truth, not the frame's position in the read sequence).
+  --
+  -- CORRECTED 2026-08-27, same day as the original fix: do NOT stop as
+  -- soon as a category is "satisfied" (one field seen). A real bug found
+  -- live: LIGHT's response now spans more chunks than it used to (after
+  -- adding the Sleep/Wake Up fields), and light_mode/light_brightness_percent
+  -- -- present in an early chunk -- would satisfy "LIGHT" and break the
+  -- loop before later chunks (containing e.g. wake_up_brightness) were
+  -- ever read, silently leaving those fields at their default forever.
+  -- "one field seen" was never a valid proxy for "this category's whole
+  -- response has arrived" -- it happened to work only because every
+  -- category's response fit in few-enough early chunks before this. Now
+  -- always read up to a generous frame budget and let a genuine
+  -- end-of-burst (read_slip_frame returning nil on timeout) be the only
+  -- early exit -- cheap in practice since a real burst is normally over
+  -- in well under a second and an actually-idle socket times out fast.
   local satisfied = {}
   local satisfied_count = 0
   local total_wanted = #category_names
-  local max_frames = total_wanted + 4
+  local max_frames = total_wanted * 15 + 10
   for _ = 1, max_frames do
-    if satisfied_count >= total_wanted then
-      break
-    end
     local frame = read_slip_frame(sock)
     if not frame then
       break -- out of frames or timed out -- stop, evaluate what we got
