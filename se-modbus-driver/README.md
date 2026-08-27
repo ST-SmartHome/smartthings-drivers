@@ -49,10 +49,11 @@ up preference changes and (re)starts polling against the configured address.
 Confirmed via live `logcat` against the real inverter (SE5000AU) — power,
 lifetime energy, DC voltage/power, temperature, and status all reporting
 sane, stable values across multiple poll cycles, and visible in the
-SmartThings app:
+SmartThings app. Example log line shape (values illustrative, not a real
+reading):
 
 ```
-SolarEdge reading: 3441.0W, 30710200.0Wh lifetime, 373.0V DC, 3493.0W DC, 53.2C, status=MPPT
+SolarEdge reading: <W>W, <Wh> lifetime, <V> DC, <W> DC, <°C>, status=MPPT
 ```
 
 Deployed as `se-modbus-v4`, driverId `f96cdedb-9d98-4834-96f4-3af2aab8fecb`,
