@@ -112,16 +112,6 @@ better to skip and log a bad reading than repeat that.
   etc.) polls this inverter's Modbus TCP service, this driver's connection
   attempts will conflict with it.
 
-## Useful commands
+## SmartThings Community
 
-```bash
-cd se-modbus-driver  # wherever you cloned this repo
-
-# repackage + reassign + reinstall after any further code change
-smartthings edge:drivers:package . --token <pat>
-smartthings edge:channels:assign <driver-id> --channel <channel-id> --token <pat>
-smartthings edge:drivers:install <driver-id> --hub <hub-id> --channel <channel-id> --token <pat>
-
-# live logs
-smartthings edge:drivers:logcat <driver-id> --hub-address <your-hub-ip> --token <pat>
-```
+https://community.smartthings.com/t/st-edge-driver-solaredge-pv-inverter/310477/3
