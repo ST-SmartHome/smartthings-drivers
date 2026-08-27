@@ -242,10 +242,10 @@ hub.
 write-command failure.** Symptom: fan speed/switch/light commands would
 silently time out (`header receive failed: timeout`) while status reads
 always worked fine — looked exactly like a network/hub problem, and an
-extensive investigation ruled out UniFi, the SmartThings hub, firewall/IPS,
-Tuya cloud auth, and this driver's own code being stale, all with hard
-evidence, before the real cause was found. Two real protocol bugs, both
-required together:
+extensive investigation ruled out the router, the SmartThings hub,
+firewall/IPS, Tuya cloud auth, and this driver's own code being stale, all
+with hard evidence, before the real cause was found. Two real protocol
+bugs, both required together:
 - `Tuya.encode()` never added the 15-byte clear (unencrypted) header —
   `"3.3"` + 12 zero bytes — that Tuya protocol 3.2+ requires on every
   command except `DP_QUERY`/`DP_QUERY_NEW`. `decode()` already knew to
