@@ -68,38 +68,21 @@ channel `Drivers` (`781ea3f1-a95c-492f-9952-59ef19f43505`), installed on hub
 (`acfad246-65c6-4af5-9bb9-fb21f4e633a6`), preferences set to
 `192.168.1.100:1502` (placeholder — real LAN IP set per-install), unit id `1`, 30s poll interval.
 
-### Bugs found and fixed along the way (in order)
+### What shows up in the SmartThings app
 
-1. `config.yml` `permissions` needed a mapping (`lan: {}` / `discovery: {}`),
-   not a list — caught at packaging.
-2. Device profile category `Other` isn't valid — used `SolarPanel`.
-3. **The actual original bug**: `search-parameters.yml` gated discovery on
-   SSDP traffic the inverter's passive Modbus TCP service never sends —
-   driver was simply never invoked. Fixed by dropping network-gated
-   discovery entirely in favor of unconditional single-device creation +
-   IP/port entered as a device preference afterward.
-4. `discovery.lua`'s "does it already exist" check called
-   `get_device_info()` with a network-id string instead of a device UUID —
-   harmless (platform's own DNI-collision check prevented duplicates
-   anyway) but logged an error every run. Fixed to check `driver:get_devices()`.
-5. Hardcoded inverter-model base address (documented 40069) was wrong for
-   this device — produced sentinel/garbage values (0x8000, NaN, -inf).
-   Replaced with a proper SunSpec model-chain walk (`sunspec.lua`) that
-   locates Model 101/102/103 dynamically. Actual address on this unit:
-   wire 69.
-6. Off-by-one in the temperature/status offsets — a phantom "reserved"
-   register that doesn't exist in the real spec shifted every field from
-   `DCW_SF` onward by one register (`53060000.0C`, `status=UNKNOWN(0)`).
-   Removed the phantom offset.
-7. Cabinet temperature slot specifically was the SunSpec "not implemented"
-   sentinel (`-32768` raw) on this inverter — this unit populates the Heat
-   Sink slot instead. Now reads all four temperature slots and uses the
-   first non-sentinel one.
+| Component | Capability | Shows |
+|---|---|---|
+| `main` | `powerMeter` | Live inverter output power (W) |
+| `main` | `energyMeter` | Lifetime energy produced (kWh) |
+| `main` | `temperatureMeasurement` | Inverter temperature (°C) |
+| `main` | `aboutisland47519.inverterStatus` | Operating status (MPPT/THROTTLED/FAULT/etc — see below) |
+| `main` | `refresh` | Manual refresh button |
+| `grid` (optional hardware) | `powerMeter` | Net grid power, signed — see "Grid import/export meter" above |
+| `grid` (optional hardware) | `aboutisland47519.gridEnergy` | Lifetime exported/imported energy (kWh) |
 
-Also added: a defensive bounds check before emitting temperature (matching
-the platform's own `-460..10000` constraint), since bug #6 crashed the
-device's event thread when the platform rejected an out-of-range value —
-better to skip and log a bad reading than repeat that.
+DC voltage and DC power are read from the inverter every poll cycle and
+logged, but aren't currently exposed as app-visible capabilities — only
+in `logcat` output, not the SmartThings app itself.
 
 ## Inverter operating status
 
