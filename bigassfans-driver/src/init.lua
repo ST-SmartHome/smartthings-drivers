@@ -564,10 +564,10 @@ end
 -- a profile-name bump has TWO places that must move together, the YAML
 -- file's own `name:` and whatever constant here requests it by name --
 -- treat them as one edit, never one without the other.
-local WITH_ADDFAN_PROFILE = "bigassfans-h.v6"
-local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v6"
-local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v6"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v6"
+local WITH_ADDFAN_PROFILE = "bigassfans-h.v7"
+local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v7"
+local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v7"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v7"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
 -- All four reset to nil after the 2026-08-27 v2->v3 bump above (a new
