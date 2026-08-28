@@ -75,13 +75,14 @@ query first (see `BafClient.commit_and_verify_more`).
 | 69 | `light_brightness_percent` | int | LIGHT | 0–100%, maps directly to the app's brightness slider |
 | 98 | `sleep_mode_enable` | bool | MORE push-only | Sleep Mode master toggle (a real physical remote button) |
 | 100 | `sleep_fan_mode` | enum | FAN | Off/On/Auto — the Sleep tab's own fan-mode selector, distinct from the main `fan_mode` |
-| 101 | — | — | FAN | Unconfirmed — a candidate for the Sleep screen's "Min Speed" field, never independently isolated. Not implemented |
+| 101 | `sleep_speed` | int | FAN | Native 0–7 — the Sleep tab's own current fan speed (shown as "Speed" on the Sleep ON-mode screen), distinct from the main `speed` field |
 | 102 | `sleep_ideal_temp` | int (×100 °C) | FAN | Sleep Auto mode's target temperature (e.g. 2056 = 20.56°C) |
-| 103 | `sleep_brightness_mode` | enum | LIGHT | Off/Dim/Auto — the light's Sleep preset |
+| 103 | `sleep_brightness_mode` | enum | LIGHT | Off/On/Auto — the light's Sleep preset |
+| 104 | `sleep_brightness_percent` | int | LIGHT | 0–100%, Sleep preset brightness — pairs with `sleep_brightness_mode` the same way `wake_up_brightness` pairs with `wake_up_mode` |
 | 107 | `wake_up_mode` | enum | LIGHT | Off/On/Auto — the light's Wake Up preset |
 | 108 | `wake_up_brightness` | int | LIGHT | 0–100%, Wake Up preset brightness |
 | 110 | `sleep_timer_enable` | bool | FAN | The Sleep tab's own on-device Timer toggle (separate from `sleep_mode_enable` and from SmartThings' unrelated generic "Timer" card) |
-| 111 | — | — | FAN | Unconfirmed — a candidate for the Sleep screen's "Max Speed" field, never independently isolated. Not implemented |
+| 111 | `sleep_timer_end_speed` | int | FAN | Native 0–7 — the Sleep Timer's "End Speed", the target speed it gradually decreases to over `sleep_timer_duration` |
 | 112 | `sleep_timer_duration` | int (seconds) | FAN | Sleep Timer's duration |
 | 128 | `wake_up_motion_timeout_secs` | int (seconds) | LIGHT | Wake Up preset's post-motion timeout |
 | 129 | `sleep_return_to_auto` | bool | FAN | The Auto screen's "Return to Auto" toggle — auto-reverts a manual adjustment after `sleep_return_to_auto_secs` |
@@ -210,10 +211,11 @@ script, and unit-test the Lua wire-format code against it directly.
   not empirically tested with a fan actually segmented onto a different
   VLAN from the hub (both fans tested are on the same network as each
   other and, presumably, the hub).
-- Fields 101/111, candidates for the Sleep Auto screen's "Min Speed"/
-  "Max Speed" fields, were never independently isolated and aren't
-  implemented — every other Sleep/Wake Up sub-setting field is now
-  confirmed and shipped, see the field table above.
+- Fields 101/111 (previously listed here as unconfirmed "Min Speed"/"Max
+  Speed" candidates) turned out to be `sleep_speed` and
+  `sleep_timer_end_speed` instead — resolved via a fresh packet capture,
+  see the field table above. Every Sleep/Wake Up sub-setting field is now
+  confirmed and shipped.
 - No write path exists for the fan's own on-device schedule (creating or
   editing a schedule entry) — only reading an already-configured
   schedule is implemented. This is no longer just unconfirmed: a packet
