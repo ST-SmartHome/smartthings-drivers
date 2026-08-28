@@ -74,7 +74,18 @@ query first (see `BafClient.commit_and_verify_more`).
 | 68 | `light_mode` | enum | LIGHT | Off/On/Auto |
 | 69 | `light_brightness_percent` | int | LIGHT | 0–100%, maps directly to the app's brightness slider |
 | 98 | `sleep_mode_enable` | bool | MORE push-only | Sleep Mode master toggle (a real physical remote button) |
-| 100/101/110/111/112 | — | — | MORE push-only | Seen alongside field 98 in the same push burst, suspected to be Sleep Mode's other sub-settings (fan/light preset, Wake Up behavior) — **not individually confirmed**, deliberately not implemented until they are |
+| 100 | `sleep_fan_mode` | enum | FAN | Off/On/Auto — the Sleep tab's own fan-mode selector, distinct from the main `fan_mode` |
+| 101 | — | — | FAN | Unconfirmed — a candidate for the Sleep screen's "Min Speed" field, never independently isolated. Not implemented |
+| 102 | `sleep_ideal_temp` | int (×100 °C) | FAN | Sleep Auto mode's target temperature (e.g. 2056 = 20.56°C) |
+| 103 | `sleep_brightness_mode` | enum | LIGHT | Off/Dim/Auto — the light's Sleep preset |
+| 107 | `wake_up_mode` | enum | LIGHT | Off/On/Auto — the light's Wake Up preset |
+| 108 | `wake_up_brightness` | int | LIGHT | 0–100%, Wake Up preset brightness |
+| 110 | `sleep_timer_enable` | bool | FAN | The Sleep tab's own on-device Timer toggle (separate from `sleep_mode_enable` and from SmartThings' unrelated generic "Timer" card) |
+| 111 | — | — | FAN | Unconfirmed — a candidate for the Sleep screen's "Max Speed" field, never independently isolated. Not implemented |
+| 112 | `sleep_timer_duration` | int (seconds) | FAN | Sleep Timer's duration |
+| 128 | `wake_up_motion_timeout_secs` | int (seconds) | LIGHT | Wake Up preset's post-motion timeout |
+| 129 | `sleep_return_to_auto` | bool | FAN | The Auto screen's "Return to Auto" toggle — auto-reverts a manual adjustment after `sleep_return_to_auto_secs` |
+| 130 | `sleep_return_to_auto_secs` | int (seconds) | FAN | Duration for the above |
 | 134 | `led_indicators_enable` | bool | MORE push-only | LED indicators on/off |
 | 135 | `fan_beep_enable` | bool | MORE push-only | Fan beep on/off |
 | 136 | `legacy_ir_remote_enable` | bool | MORE push-only | Legacy IR remote support on/off |
@@ -96,7 +107,7 @@ items.
 - `search-parameters.yml` — gates the hub's pre-scan on the `_api._tcp`
   mDNS service, so `discovery_handler` only fires when something matching
   is actually present.
-- `profiles/bigassfans-h.yml` — four components:
+- `profiles/bigassfans-h.yml` — five components:
   - `main` — `switch`, `fanSpeed` (native range 0–7, not a percentage),
     `refresh`, and custom capabilities: `fanMode` (Off/On/Auto),
     `fanDirection` (Forward/Reverse), `whoosh` (Off/On), `ecoMode`
@@ -118,9 +129,19 @@ items.
     these three capabilities carry both the original `setXxx(value)`
     command and the newer `turnOn`/`turnOff` pair; only the latter is
     wired to the current presentation.
-  - One preference: "Manual IP Override" (`ipAddress`, sentinel
-    `0.0.0.0` meaning "use the mDNS-discovered address"), plus
-    `pollInterval`. No secrets to enter — see protocol notes above.
+  - `sleep` — the Sleep tab's own sub-settings (see the field table
+    above for exact numbers): `sleepAutoMode` (Off/On/Auto fan mode),
+    `sleepIdealTemperature`, `sleepTimer` + `sleepTimerDuration`,
+    `sleepReturnToAuto` + `sleepReturnToAutoDuration`,
+    `sleepBrightnessMode` (Off/Dim/Auto, the light's Sleep preset),
+    `wakeUpMode`/`wakeUpBrightness`/`wakeUpMotionTimeout` (the light's
+    Wake Up preset). All ten are directly queryable under FAN/LIGHT,
+    unlike `sleepMode`/`ledIndicators`/etc above — no MORE-push
+    mechanism needed, just the normal commit-then-verify path.
+  - Preferences: "Manual IP Override" (`ipAddress`, sentinel
+    `0.0.0.0` meaning "use the mDNS-discovered address"), `pollInterval`,
+    "Hide 'Add Another Fan' Button" (`hideAddFan`), and "No Physical
+    Light" (`noLight`). No secrets to enter — see protocol notes above.
 - `src/slip.lua` — SLIP encode/decode.
 - `src/protobuf.lua` — minimal hand-written protobuf wire codec (varint +
   length-delimited encode/decode). Not a general protobuf library — just
