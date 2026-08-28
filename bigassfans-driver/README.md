@@ -210,12 +210,18 @@ script, and unit-test the Lua wire-format code against it directly.
   not empirically tested with a fan actually segmented onto a different
   VLAN from the hub (both fans tested are on the same network as each
   other and, presumably, the hub).
-- Fields 100/101/110/111/112, suspected Sleep Mode sub-settings, aren't
-  individually confirmed — see the field table above.
+- Fields 101/111, candidates for the Sleep Auto screen's "Min Speed"/
+  "Max Speed" fields, were never independently isolated and aren't
+  implemented — every other Sleep/Wake Up sub-setting field is now
+  confirmed and shipped, see the field table above.
 - No write path exists for the fan's own on-device schedule (creating or
   editing a schedule entry) — only reading an already-configured
-  schedule is implemented. No known `Commit{schedules}` equivalent to
-  the `Commit{properties}` path used for everything else in this driver.
+  schedule is implemented. This is no longer just unconfirmed: a packet
+  capture of the app editing a schedule showed **zero** local `Commit`
+  frames the entire time, while the app's `api.bigassfans.com` cloud
+  endpoint was active throughout — schedule writes appear to genuinely
+  go through BAF's cloud API, not the local i6 protocol this driver
+  speaks at all, unlike everything else in this driver.
 - Motion sensing (field 52) is implemented at the protocol level and
   confirmed working, but isn't exposed as a SmartThings capability yet —
   no command handler wired up in `init.lua`.
