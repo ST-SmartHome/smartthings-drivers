@@ -267,8 +267,8 @@ local function poll_once(driver, device)
     -- same connection, no extra TCP overhead.
     --
     -- One immediate retry on failure: found 2026-08-22 that on a
-    -- sufficiently lossy Wi-Fi network (a congested 2.4GHz SSID running
-    -- ~40% TX retry rates on both fans, unrelated to this driver)
+    -- sufficiently lossy Wi-Fi network (a congested 2.4GHz SSID
+    -- runs ~40% TX retry rates on both fans, unrelated to this driver)
     -- poll_once fails with "read failed waiting for start delimiter:
     -- timeout" on roughly 1-in-5 cycles per fan — a lost/delayed response,
     -- not a slow one, so a longer timeout wouldn't help; a fresh attempt
@@ -459,17 +459,17 @@ end
 -- the platform forever, because the platform silently drops an event for
 -- a capability/component combination the profile doesn't declare.
 local MORE_CAP_EMIT = {
-  -- A lowercase-enum test here ("on"/"off", matching the stock `switch`
-  -- capability's own convention) was tried once to see if
+  -- REVERTED 2026-08-27: a lowercase-enum test here ("on"/"off", matching
+  -- the stock `switch` capability's own convention) was tried to see if
   -- displayType:"switch" only tracks lowercase state -- instead of
   -- giving a clean signal, changing the enum values put the platform's
   -- own status cache into a stuck state (over a minute with zero update
   -- despite confirmed real hardware changes and multiple commands) rather
   -- than answering the question. Reverted back to "On"/"Off" to match
-  -- fanBeep/legacyIrRemote and get the attribute unstuck (a hub reboot
-  -- was needed to actually clear the stuck status). Don't retry this
-  -- exact test on a live capability without a safer way to validate it
-  -- first (a throwaway capability, not one of these three).
+  -- fanBeep/legacyIrRemote and get the attribute unstuck. Don't retry
+  -- this exact test on a live capability without a safer way to validate
+  -- it first (a throwaway capability, not one of the shipped three) --
+  -- see project-status memory for the full writeup and open question.
   led_indicators_enable = function(device, value)
     device:emit_component_event(device.profile.components.settings,
       LED_INDICATORS_CAP.ledIndicators({ value = value and "On" or "Off" }))
@@ -564,10 +564,10 @@ end
 -- a profile-name bump has TWO places that must move together, the YAML
 -- file's own `name:` and whatever constant here requests it by name --
 -- treat them as one edit, never one without the other.
-local WITH_ADDFAN_PROFILE = "bigassfans-h.v4"
-local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v4"
-local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v4"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v4"
+local WITH_ADDFAN_PROFILE = "bigassfans-h.v6"
+local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v6"
+local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v6"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v6"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
 -- All four reset to nil after the 2026-08-27 v2->v3 bump above (a new
@@ -635,7 +635,7 @@ end
 
 --- Automatic for every fan with a physical light — no per-device opt-in
 --- anymore. Piloted behind a splitLightDevice preference on one fan
---- first (2026-08-25: created, confirmed mirroring state both
+--- Fan first (2026-08-25: created, confirmed mirroring state both
 --- directions and controlling the real light, confirmed as its own
 --- separate Alexa device) before making it unconditional here for every
 --- other fan too, including ones added in the future. Still skipped for
@@ -762,8 +762,8 @@ end
 
 -- CORRECTED 2026-08-25: the "never takes effect" conclusion that removed
 -- this handler was wrong — reverse_enable does get committed, just with
--- an unpredictable delay (confirmed when a fan turned up running
--- reverse_enable=true, well after the original short wait-then-
+-- an unpredictable delay (confirmed when a fan turned up
+-- running reverse_enable=true, well after the original short wait-then-
 -- verify test looked like it failed; see project-status memory for the
 -- full writeup and the incident that caught it). Handler restored.
 -- Known real limitation: a command sent here may not visibly apply for
@@ -775,8 +775,8 @@ end
 --
 -- 2026-08-25: added a stop-the-fan-first interlock, since this original
 -- code committed reverse_enable directly regardless of whether the fan
--- was spinning -- the exact sequence that likely put a fan into reverse
--- at full speed in the first place, and was worked around
+-- was spinning -- the exact sequence that likely put a fan
+-- into reverse at full speed in the first place, and was worked around
 -- manually (stop, verify stopped, then flip) via the standalone fix
 -- script when that incident was caught. That manual sequence is now
 -- built into the handler instead of relying on doing it by hand again.
