@@ -1,4 +1,4 @@
-name: bigassfans-h-no-light.v6
+name: bigassfans-h-no-light.v7
 components:
   - id: main
     label: "Fan"
@@ -64,3 +64,37 @@ components:
         version: 1
       - id: aboutisland47519.wakeUpBrightness
         version: 1
+preferences:
+  - title: "Manual IP Override"
+    name: ipAddress
+    description: "Leave as 0.0.0.0 to use automatic mDNS discovery (the normal case). Only set a real IP here if this fan isn't being found automatically."
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      minLength: 7
+      maxLength: 15
+      default: "0.0.0.0"
+  - title: "Poll Interval (seconds)"
+    name: pollInterval
+    description: "How often to query the fan's status over the local connection"
+    required: true
+    preferenceType: integer
+    definition:
+      minimum: 10
+      maximum: 3600
+      default: 30
+  - title: "Hide 'Add Another Fan' Button"
+    name: hideAddFan
+    description: "Enable to remove the 'Add another fan' button from this device's screen — useful once every fan you have has been auto-discovered"
+    required: false
+    preferenceType: boolean
+    definition:
+      default: false
+  - title: "No Physical Light"
+    name: noLight
+    description: "Enable if this specific unit has no light kit fitted — removes the Light tile instead of showing dead controls. Disable to bring the Light tile back if this was set by mistake."
+    required: false
+    preferenceType: boolean
+    definition:
+      default: true
