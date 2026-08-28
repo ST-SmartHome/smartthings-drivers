@@ -459,6 +459,17 @@ end
 -- the platform forever, because the platform silently drops an event for
 -- a capability/component combination the profile doesn't declare.
 local MORE_CAP_EMIT = {
+  -- A lowercase-enum test here ("on"/"off", matching the stock `switch`
+  -- capability's own convention) was tried once to see if
+  -- displayType:"switch" only tracks lowercase state -- instead of
+  -- giving a clean signal, changing the enum values put the platform's
+  -- own status cache into a stuck state (over a minute with zero update
+  -- despite confirmed real hardware changes and multiple commands) rather
+  -- than answering the question. Reverted back to "On"/"Off" to match
+  -- fanBeep/legacyIrRemote and get the attribute unstuck (a hub reboot
+  -- was needed to actually clear the stuck status). Don't retry this
+  -- exact test on a live capability without a safer way to validate it
+  -- first (a throwaway capability, not one of these three).
   led_indicators_enable = function(device, value)
     device:emit_component_event(device.profile.components.settings,
       LED_INDICATORS_CAP.ledIndicators({ value = value and "On" or "Off" }))
