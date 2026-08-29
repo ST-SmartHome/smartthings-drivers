@@ -26,12 +26,12 @@ against the real devices.
 - **Payload**: proto2 protobuf, `Root{ root2: Root2{ query | commit } }`.
   Full schema in `src/baf_protocol.lua`'s `FIELDS` table and comments;
   originally sourced from `jfroy/aiobafi6`'s `proto/aiobafi6.proto`.
-- **Querying is category-scoped, and the "ALL" category is misleadingly
-  named** — confirmed by direct probing, not documented anywhere: `ALL`
+- **`ALL` doesn't mean all** — despite its name, an `ALL`-category query
   only returns general/identity properties (model, firmware_version,
-  mac_address, api_version). Fan properties need a `FAN`-category query,
-  light properties a `LIGHT`-category query. This driver queries both
-  every poll cycle.
+  mac_address, api_version), confirmed by direct probing since it's
+  undocumented anywhere. Fan properties need their own `FAN`-category
+  query, light properties their own `LIGHT`-category one — this driver
+  queries both every poll cycle.
 - **Missing fields mean "at default"**: the firmware omits bool/enum
   fields that are at their zero value (OFF/false) rather than sending them
   explicitly, even in a full category response. `baf_protocol.lua`'s
