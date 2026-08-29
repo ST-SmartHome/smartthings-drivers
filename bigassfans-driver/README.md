@@ -77,7 +77,7 @@ query first (see `BafClient.commit_and_verify_more`).
 | 100 | `sleep_fan_mode` | enum | FAN | Off/On/Auto — the Sleep tab's own fan-mode selector, distinct from the main `fan_mode` |
 | 101 | `sleep_speed` | int | FAN | Native 0–7 — the Sleep tab's own current fan speed (shown as "Speed" on the Sleep ON-mode screen), distinct from the main `speed` field |
 | 102 | `sleep_ideal_temp` | int (×100 °C) | FAN | Sleep Auto mode's target temperature (e.g. 2056 = 20.56°C) |
-| 103 | `sleep_brightness_mode` | enum | LIGHT | Off/On/Auto — the light's Sleep preset (an earlier pass guessed Off/Dim/Auto from the pcap alone; corrected via a real app screenshot) |
+| 103 | `sleep_brightness_mode` | enum | LIGHT | Off/On/Auto — the light's Sleep preset |
 | 104 | `sleep_brightness_percent` | int | LIGHT | 0–100%, Sleep preset brightness — pairs with `sleep_brightness_mode` the same way `wake_up_brightness` pairs with `wake_up_mode` |
 | 107 | `wake_up_mode` | enum | LIGHT | Off/On/Auto — the light's Wake Up preset |
 | 108 | `wake_up_brightness` | int | LIGHT | 0–100%, Wake Up preset brightness |
@@ -109,11 +109,16 @@ items.
   mDNS service, so `discovery_handler` only fires when something matching
   is actually present.
 - `profiles/bigassfans-h.yml` — five components:
-  - `main` — `switch`, `fanSpeed` (native range 0–7, not a percentage),
-    `refresh`, and custom capabilities: `fanMode` (Off/On/Auto),
+  - `main` (labeled "Fan+Light" on the live no-light-no-addfan variant)
+    — `switch`, `fanMode` (Off/On/Auto, placed above `fanSpeed`),
+    `fanSpeed` (native range 0–7, not a percentage), `refresh`,
     `fanDirection` (Forward/Reverse), `whoosh` (Off/On), `ecoMode`
-    (Off/On), `sleepMode` (Off/On — a real physical remote button,
-    placed on the main controls rather than `settings`).
+    (Off/On). The plain On/Off switch and Fan Mode's Off transition both
+    cascade to the light child device too (a second, separate LIGHT-
+    category commit, never merged into the fan's own FAN-category one —
+    see `cascade_light` in `init.lua`), so turning the fan off from
+    either control turns the light off as well, and back on again.
+    `sleepMode` moved to the `sleep` component — see below.
   - `light` — `switch`, `switchLevel` (0–100%, maps directly to the
     device's own `light_brightness_percent` field, no scaling needed).
   - `management` — `aboutisland47519.addAnotherFan`, the same custom
@@ -125,7 +130,12 @@ items.
     dropdown some of this driver's other custom capabilities use):
     `ledIndicators`, `fanBeep`, `legacyIrRemote` (Off/On), plus
     `temperatureMeasurement` (ambient reading, field 86 — see the field
-    table above). A native switch toggle needs two separate zero-arg
+    table above). A `showSettings` phantom capability ("Show"/"Hide" —
+    pure local UI state, no protocol commit at all) sits first and gates
+    the other four via `visibleCondition`, same purpose as `sleepMode`'s
+    gating tree below but simpler to reason about: nothing to fail open
+    around, since there's no real hardware value it could ever be
+    waiting on. A native switch toggle needs two separate zero-arg
     commands (`turnOn`/`turnOff`), not one command taking a value —
     these three capabilities carry both the original `setXxx(value)`
     command and the newer `turnOn`/`turnOff` pair; only the latter is
@@ -211,38 +221,17 @@ script, and unit-test the Lua wire-format code against it directly.
 
 ## Known open items
 
-- Only tested against two real fans, both the same model/firmware.
-  Behavior on other Haiku/i6 models (e.g. ones without a light kit) is
-  unconfirmed.
-- `setFanSpeed` also sets `fan_mode` (nonzero speed → ON, zero → OFF) —
-  a UX judgment call, not a confirmed device behavior. The protocol keeps
-  `speed` and `fan_mode` as genuinely separate properties; whether the
-  firmware itself couples them isn't verified.
-- Whoosh/eco/comfort-mode interactions with each other aren't modeled or
-  tested — e.g. what happens if eco and whoosh are both on.
-- Fields seen in real `FAN` responses but not in the reference `.proto`
-  (e.g. field 207) are silently ignored — likely properties added by
-  firmware newer than the library's schema capture, harmless to ignore
-  for this driver's scope.
-- mDNS reflection across VLANs depends on a "Multicast DNS" or similar
-  setting on your router/controller (exact name and location vary) —
-  confirmed enabled network-wide on the network this was tested on, but
-  not empirically tested with a fan actually segmented onto a different
-  VLAN from the hub (both fans tested are on the same network as each
-  other and, presumably, the hub).
-- Fields 101/111 (previously listed here as unconfirmed "Min Speed"/"Max
-  Speed" candidates) turned out to be `sleep_speed` and
-  `sleep_timer_end_speed` instead — resolved via a fresh packet capture,
-  see the field table above. Every Sleep/Wake Up sub-setting field is now
-  confirmed and shipped.
-- No write path exists for the fan's own on-device schedule (creating or
-  editing a schedule entry) — only reading an already-configured
-  schedule is implemented. This is no longer just unconfirmed: a packet
-  capture of the app editing a schedule showed **zero** local `Commit`
-  frames the entire time, while the app's `api.bigassfans.com` cloud
-  endpoint was active throughout — schedule writes appear to genuinely
-  go through BAF's cloud API, not the local i6 protocol this driver
-  speaks at all, unlike everything else in this driver.
-- Motion sensing (field 52) is implemented at the protocol level and
-  confirmed working, but isn't exposed as a SmartThings capability yet —
-  no command handler wired up in `init.lua`.
+- Only tested against two real fans, both the same model/firmware —
+  behavior on other Haiku/i6 models (e.g. no light kit) is unconfirmed.
+- `setFanSpeed` also sets `fan_mode` (nonzero → ON, zero → OFF), a UX
+  choice, not a confirmed firmware coupling.
+- Whoosh/eco/comfort-mode interactions with each other aren't modeled.
+- Fields seen in real `FAN` responses but missing from the reference
+  `.proto` (e.g. 207) are silently ignored.
+- mDNS reflection across VLANs depends on your router's multicast-DNS
+  setting — untested with the fan on a different VLAN from the hub.
+- No write path for the fan's own on-device schedule — a packet capture
+  showed schedule edits go through BAF's cloud API, not this driver's
+  local protocol.
+- Motion sensing (field 52) works at the protocol level but isn't
+  exposed as a SmartThings capability yet.
