@@ -24,13 +24,35 @@ local ADD_ANOTHER_CAP = capabilities["aboutisland47519.addAnotherFan"]
 -- directly queryable, unlike sleepMode/ledIndicators/etc above), written
 -- via the normal send_commit/verify_commit path.
 local SLEEP_FAN_MODE_CAP = capabilities["aboutisland47519.sleepAutoMode"]
+-- Headless mirror of sleepAutoMode's own value (2026-08-29), never shown
+-- in the app itself (no detailView entry) -- exists purely so the 7
+-- sub-fields that need to gate on "is Sleep Auto Mode On/Auto" can
+-- reference THIS capability in their visibleCondition instead of
+-- sleepAutoMode directly. Confirmed live: a capability that other
+-- fields' visibleCondition depend on can't itself be fully hidden by its
+-- OWN visibleCondition -- the app forces it to render disabled instead,
+-- regardless of hideOnUnmatch's value (tried both true and false, no
+-- difference). Breaking the "referenced by" relationship via this mirror
+-- is the workaround -- see project-status memory for the full writeup.
+local SLEEP_FAN_MODE_GATE_CAP = capabilities["aboutisland47519.sleepAutoModeGate"]
+local SLEEP_SPEED_CAP = capabilities["aboutisland47519.sleepSpeed"]
 local SLEEP_IDEAL_TEMP_CAP = capabilities["aboutisland47519.sleepIdealTemperature"]
 local SLEEP_TIMER_CAP = capabilities["aboutisland47519.sleepTimer"]
+local SLEEP_TIMER_END_SPEED_CAP = capabilities["aboutisland47519.sleepTimerEndSpeed"]
 local SLEEP_TIMER_DURATION_CAP = capabilities["aboutisland47519.sleepTimerDuration"]
 local SLEEP_RETURN_TO_AUTO_CAP = capabilities["aboutisland47519.sleepReturnToAuto"]
 local SLEEP_RETURN_TO_AUTO_DURATION_CAP = capabilities["aboutisland47519.sleepReturnToAutoDuration"]
 local SLEEP_BRIGHTNESS_MODE_CAP = capabilities["aboutisland47519.sleepBrightnessMode"]
+-- Headless mirrors of sleepBrightnessMode/wakeUpMode (2026-08-29), same
+-- pattern and same reason as SLEEP_FAN_MODE_GATE_CAP above: sleepMode
+-- (the master Sleep Mode switch) has no effect on sleepBrightnessMode/
+-- wakeUpMode's own real value, so sleepBrightnessPercent/wakeUpBrightness/
+-- wakeUpMotionTimeout need to gate on THESE instead if they're to hide
+-- when Sleep Mode is off. See apply_sleep_status for the fold-in logic.
+local SLEEP_BRIGHTNESS_MODE_GATE_CAP = capabilities["aboutisland47519.sleepBrightnessModeGate"]
+local SLEEP_BRIGHTNESS_PERCENT_CAP = capabilities["aboutisland47519.sleepBrightnessPercent"]
 local WAKE_UP_MODE_CAP = capabilities["aboutisland47519.wakeUpMode"]
+local WAKE_UP_MODE_GATE_CAP = capabilities["aboutisland47519.wakeUpModeGate"]
 local WAKE_UP_BRIGHTNESS_CAP = capabilities["aboutisland47519.wakeUpBrightness"]
 local WAKE_UP_MOTION_TIMEOUT_CAP = capabilities["aboutisland47519.wakeUpMotionTimeout"]
 
@@ -44,14 +66,13 @@ local STRING_TO_OFF_ON_AUTO = { Off = 0, On = 1, Auto = 2 }
 --
 -- sleep_brightness_mode (field 103): "2" = Auto is solidly confirmed
 -- (matches the real app screenshot showing "Auto / 0%" as the current
--- Sleep light state, and the field's baseline value). The Off/Dim
--- ordering for 0/1 is NOT independently confirmed the same way -- only
--- numeric commit->readback round-trips were caught, no textual
--- before/after narration like wake_up_mode got. If this ever renders
--- backwards in the app, swap these two rather than assume the whole
--- field mapping is wrong.
-local STRING_TO_BRIGHTNESS_MODE = { Off = 0, Dim = 1, Auto = 2 }
-local BRIGHTNESS_MODE_TO_STRING = { [0] = "Off", [1] = "Dim", [2] = "Auto" }
+-- Sleep light state, and the field's baseline value). CONFIRMED
+-- 2026-08-28 via a real screenshot of the official app's Sleep > Light
+-- sub-screen: the three options are OFF / ON / AUTO, not Off/Dim/Auto --
+-- "Dim" was a guess, corrected here. Numeric order (0/1/2) unchanged,
+-- only the label for 1 changes from "Dim" to "On".
+local STRING_TO_BRIGHTNESS_MODE = { Off = 0, On = 1, Auto = 2 }
+local BRIGHTNESS_MODE_TO_STRING = { [0] = "Off", [1] = "On", [2] = "Auto" }
 -- wake_up_mode (field 107) turns out to share the SAME Off/On/Auto order
 -- as fan_mode -- confirmed via the commit's own immediate read-back in
 -- the pcap (committed 1 -> read back 1 right after "On"; committed 2 ->
@@ -182,18 +203,48 @@ end
 --- params are the FAN/LIGHT category results already fetched by the
 --- caller; either may be nil if that category's query failed this cycle,
 --- in which case its half is simply skipped for this emit.
+---
+--- sleepAutoModeGate (2026-08-29 fix): originally just mirrored
+--- sleep_fan_mode unconditionally, same as sleepAutoMode itself -- which
+--- meant the master "Sleep Mode" switch (sleepMode, field 98, a totally
+--- separate MORE_PUSH-only field) had no actual effect on it, so
+--- sleepSpeed/sleepTimer/sleepTimerEndSpeed/sleepTimerDuration stayed
+--- visible even with Sleep Mode off (real bug, caught via a live
+--- screenshot). Now folds in the last-known sleepMode value: an explicit
+--- "Off" forces the gate to "Off" (hiding the sub-fields); anything else,
+--- including nil (sleepMode's MORE-push value hasn't been captured yet,
+--- e.g. right after a driver restart -- see the earlier "stuck at null"
+--- incident), fails OPEN and passes the real fan value through. Failing
+--- closed on nil would collapse the whole Sleep section by default on
+--- every fresh driver start, which is worse than today's bug.
 local function apply_sleep_status(device, fan, light)
   local sleep_component = device.profile.components.sleep
   if not sleep_component then
     return
   end
+  -- Shared by both halves below (fan and light can arrive on different
+  -- poll cycles if one category's query failed) -- see the fold-in note
+  -- on sleepAutoModeGate above for why "Off" is the only value that
+  -- forces a hide and nil/anything else fails open.
+  local sleep_mode_state = device:get_latest_state("sleep", "aboutisland47519.sleepMode", "sleepMode")
   if fan then
+    local sleep_fan_mode_str = OFF_ON_AUTO_TO_STRING[fan.sleep_fan_mode] or "Off"
+    local gate_value = sleep_fan_mode_str
+    if sleep_mode_state == "Off" then
+      gate_value = "Off"
+    end
     device:emit_component_event(sleep_component,
-      SLEEP_FAN_MODE_CAP.sleepFanMode({ value = OFF_ON_AUTO_TO_STRING[fan.sleep_fan_mode] or "Off" }))
+      SLEEP_FAN_MODE_CAP.sleepFanMode({ value = sleep_fan_mode_str }))
+    device:emit_component_event(sleep_component,
+      SLEEP_FAN_MODE_GATE_CAP.sleepAutoModeGate({ value = gate_value }))
+    device:emit_component_event(sleep_component,
+      SLEEP_SPEED_CAP.sleepSpeed({ value = fan.sleep_speed }))
     device:emit_component_event(sleep_component,
       SLEEP_IDEAL_TEMP_CAP.sleepIdealTemp({ value = fan.sleep_ideal_temp / 100.0, unit = "C" }))
     device:emit_component_event(sleep_component,
       SLEEP_TIMER_CAP.sleepTimerEnable({ value = fan.sleep_timer_enable and "On" or "Off" }))
+    device:emit_component_event(sleep_component,
+      SLEEP_TIMER_END_SPEED_CAP.sleepTimerEndSpeed({ value = fan.sleep_timer_end_speed }))
     device:emit_component_event(sleep_component,
       SLEEP_TIMER_DURATION_CAP.sleepTimerDuration({ value = math.floor(fan.sleep_timer_duration / 60), unit = "min" }))
     device:emit_component_event(sleep_component,
@@ -202,10 +253,24 @@ local function apply_sleep_status(device, fan, light)
       SLEEP_RETURN_TO_AUTO_DURATION_CAP.sleepReturnToAutoDuration({ value = math.floor(fan.sleep_return_to_auto_secs / 60), unit = "min" }))
   end
   if light then
+    local brightness_mode_str = BRIGHTNESS_MODE_TO_STRING[light.sleep_brightness_mode] or "Off"
+    local wake_mode_str = WAKE_MODE_TO_STRING[light.wake_up_mode] or "Off"
+    local brightness_gate_value = brightness_mode_str
+    local wake_gate_value = wake_mode_str
+    if sleep_mode_state == "Off" then
+      brightness_gate_value = "Off"
+      wake_gate_value = "Off"
+    end
     device:emit_component_event(sleep_component,
-      SLEEP_BRIGHTNESS_MODE_CAP.sleepBrightnessMode({ value = BRIGHTNESS_MODE_TO_STRING[light.sleep_brightness_mode] or "Off" }))
+      SLEEP_BRIGHTNESS_MODE_CAP.sleepBrightnessMode({ value = brightness_mode_str }))
     device:emit_component_event(sleep_component,
-      WAKE_UP_MODE_CAP.wakeUpMode({ value = WAKE_MODE_TO_STRING[light.wake_up_mode] or "Off" }))
+      SLEEP_BRIGHTNESS_MODE_GATE_CAP.sleepBrightnessModeGate({ value = brightness_gate_value }))
+    device:emit_component_event(sleep_component,
+      SLEEP_BRIGHTNESS_PERCENT_CAP.sleepBrightnessPercent({ value = light.sleep_brightness_percent, unit = "%" }))
+    device:emit_component_event(sleep_component,
+      WAKE_UP_MODE_CAP.wakeUpMode({ value = wake_mode_str }))
+    device:emit_component_event(sleep_component,
+      WAKE_UP_MODE_GATE_CAP.wakeUpModeGate({ value = wake_gate_value }))
     device:emit_component_event(sleep_component,
       WAKE_UP_BRIGHTNESS_CAP.wakeUpBrightness({ value = light.wake_up_brightness, unit = "%" }))
     device:emit_component_event(sleep_component,
@@ -267,8 +332,8 @@ local function poll_once(driver, device)
     -- same connection, no extra TCP overhead.
     --
     -- One immediate retry on failure: found 2026-08-22 that on a
-    -- sufficiently lossy Wi-Fi network (a congested 2.4GHz SSID
-    -- runs ~40% TX retry rates on both fans, unrelated to this driver)
+    -- sufficiently lossy Wi-Fi network (one household network was seen
+    -- running ~40% TX retry rates on both fans, unrelated to this driver)
     -- poll_once fails with "read failed waiting for start delimiter:
     -- timeout" on roughly 1-in-5 cycles per fan — a lost/delayed response,
     -- not a slow one, so a longer timeout wouldn't help; a fresh attempt
@@ -482,12 +547,21 @@ local MORE_CAP_EMIT = {
     device:emit_component_event(device.profile.components.settings,
       LEGACY_IR_REMOTE_CAP.legacyIrRemote({ value = value and "On" or "Off" }))
   end,
-  -- Sleep Mode lives on "main" (a real physical remote button, unlike
-  -- LED/Beep/IR -- placed on the main Fan controls per the user's stated
-  -- rule, not the settings-only component), so plain emit_event (which
-  -- implicitly targets "main") is correct here, unlike the three above.
+  -- Sleep Mode moved from "main" to "sleep" (2026-08-29) -- see the
+  -- visibleCondition/first-tile writeup in project-status memory: the
+  -- platform can never fully hide a section's first detailView tile
+  -- (renders disabled instead, confirmed via a live position-swap test),
+  -- so Sleep Mode itself -- which should always be visible and never
+  -- needs its own gate -- is deliberately placed first in "sleep" to
+  -- absorb that un-hideable slot, freeing sleepAutoMode/
+  -- sleepBrightnessMode/wakeUpMode (now positions 2+) to hide correctly.
   sleep_mode_enable = function(device, value)
-    device:emit_event(SLEEP_MODE_CAP.sleepMode({ value = value and "On" or "Off" }))
+    local sleep_component = device.profile.components.sleep
+    if not sleep_component then
+      return
+    end
+    device:emit_component_event(sleep_component,
+      SLEEP_MODE_CAP.sleepMode({ value = value and "On" or "Off" }))
   end,
 }
 
@@ -567,7 +641,7 @@ end
 local WITH_ADDFAN_PROFILE = "bigassfans-h.v7"
 local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v7"
 local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v7"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v7"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v20"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
 -- All four reset to nil after the 2026-08-27 v2->v3 bump above (a new
@@ -635,7 +709,7 @@ end
 
 --- Automatic for every fan with a physical light — no per-device opt-in
 --- anymore. Piloted behind a splitLightDevice preference on one fan
---- Fan first (2026-08-25: created, confirmed mirroring state both
+--- first (2026-08-25: created, confirmed mirroring state both
 --- directions and controlling the real light, confirmed as its own
 --- separate Alexa device) before making it unconditional here for every
 --- other fan too, including ones added in the future. Still skipped for
@@ -775,7 +849,7 @@ end
 --
 -- 2026-08-25: added a stop-the-fan-first interlock, since this original
 -- code committed reverse_enable directly regardless of whether the fan
--- was spinning -- the exact sequence that likely put a fan
+-- was spinning -- the exact sequence that likely put that fan
 -- into reverse at full speed in the first place, and was worked around
 -- manually (stop, verify stopped, then flip) via the standalone fix
 -- script when that incident was caught. That manual sequence is now
@@ -912,6 +986,10 @@ local function set_sleep_fan_mode(driver, device, command)
   end
 end
 
+local function set_sleep_speed(driver, device, command)
+  send_commit(driver, device, { sleep_speed = math.floor(command.args.value) }, true)
+end
+
 local function set_sleep_ideal_temp(driver, device, command)
   local value = math.floor(command.args.value * 100 + 0.5)
   send_commit(driver, device, { sleep_ideal_temp = value }, true)
@@ -923,6 +1001,10 @@ end
 
 local function sleep_timer_off(driver, device, command)
   send_commit(driver, device, { sleep_timer_enable = false }, true)
+end
+
+local function set_sleep_timer_end_speed(driver, device, command)
+  send_commit(driver, device, { sleep_timer_end_speed = math.floor(command.args.value) }, true)
 end
 
 local function set_sleep_timer_duration(driver, device, command)
@@ -946,6 +1028,10 @@ local function set_sleep_brightness_mode(driver, device, command)
   if value then
     send_commit(driver, device, { sleep_brightness_mode = value }, true)
   end
+end
+
+local function set_sleep_brightness_percent(driver, device, command)
+  send_commit(driver, device, { sleep_brightness_percent = math.floor(command.args.value) }, true)
 end
 
 local function set_wake_up_mode(driver, device, command)
@@ -1045,6 +1131,9 @@ local baf_driver = Driver("bigassfans-i6-lan", {
     [SLEEP_FAN_MODE_CAP.ID] = {
       ["setSleepFanMode"] = set_sleep_fan_mode,
     },
+    [SLEEP_SPEED_CAP.ID] = {
+      ["setSleepSpeed"] = set_sleep_speed,
+    },
     [SLEEP_IDEAL_TEMP_CAP.ID] = {
       ["setSleepIdealTemp"] = set_sleep_ideal_temp,
     },
@@ -1054,6 +1143,9 @@ local baf_driver = Driver("bigassfans-i6-lan", {
       end,
       ["turnOn"] = sleep_timer_on,
       ["turnOff"] = sleep_timer_off,
+    },
+    [SLEEP_TIMER_END_SPEED_CAP.ID] = {
+      ["setSleepTimerEndSpeed"] = set_sleep_timer_end_speed,
     },
     [SLEEP_TIMER_DURATION_CAP.ID] = {
       ["setSleepTimerDuration"] = set_sleep_timer_duration,
@@ -1070,6 +1162,9 @@ local baf_driver = Driver("bigassfans-i6-lan", {
     },
     [SLEEP_BRIGHTNESS_MODE_CAP.ID] = {
       ["setSleepBrightnessMode"] = set_sleep_brightness_mode,
+    },
+    [SLEEP_BRIGHTNESS_PERCENT_CAP.ID] = {
+      ["setSleepBrightnessPercent"] = set_sleep_brightness_percent,
     },
     [WAKE_UP_MODE_CAP.ID] = {
       ["setWakeUpMode"] = set_wake_up_mode,
