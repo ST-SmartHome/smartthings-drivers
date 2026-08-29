@@ -128,16 +128,28 @@ baf.FIELDS = {
   -- LIGHT. Field meanings confirmed by matching a specific committed
   -- value to a specific real UI action, then cross-checked against real
   -- app screenshots (which corrected two guesses from the pcap-only
-  -- decode — see project-status memory for the full writeup). Two
-  -- adjacent fields (101/111, "Min/Max Speed" on the real Auto screen)
-  -- were deliberately left unmodeled — never independently isolated.
+  -- decode — see project-status memory for the full writeup).
+  --
+  -- 2026-08-28: fields 101/111 (previously left unmodeled as "Min/Max
+  -- Speed" guesses, never independently isolated) resolved via a fresh
+  -- pcap capture of the real app's Sleep > Fan (ON mode) screen,
+  -- confirmed against the screen's own "Speed"/"End Speed" sliders:
+  -- 101 = sleep_speed (the Sleep tab's own fan speed, native 0-7, NOT a
+  -- min/max pair), 111 = sleep_timer_end_speed (the Sleep Timer's
+  -- gradual-decrease target speed, native 0-7). Same capture also found
+  -- 104 = sleep_brightness_percent, paired with sleep_brightness_mode
+  -- (103) the same way wake_up_brightness (108) pairs with wake_up_mode
+  -- (107) — previously undiscovered, no field existed for it at all.
   sleep_fan_mode              = { no = 100, kind = "enum", category = "FAN",   default = 2 },   -- Off/On/Auto
+  sleep_speed                 = { no = 101, kind = "int",  category = "FAN",   default = 0 },   -- native 0-7
   sleep_ideal_temp            = { no = 102, kind = "int",  category = "FAN",   default = 2050 }, -- x100 C
   sleep_timer_enable          = { no = 110, kind = "bool", category = "FAN",   default = false },
+  sleep_timer_end_speed       = { no = 111, kind = "int",  category = "FAN",   default = 0 },   -- native 0-7
   sleep_timer_duration        = { no = 112, kind = "int",  category = "FAN",   default = 300 },  -- seconds
   sleep_return_to_auto        = { no = 129, kind = "bool", category = "FAN",   default = false },
   sleep_return_to_auto_secs   = { no = 130, kind = "int",  category = "FAN",   default = 7200 },
   sleep_brightness_mode       = { no = 103, kind = "enum", category = "LIGHT", default = 2 },   -- Off/Dim/Auto
+  sleep_brightness_percent    = { no = 104, kind = "int",  category = "LIGHT", default = 0 },   -- percent
   wake_up_mode                = { no = 107, kind = "enum", category = "LIGHT", default = 0 },   -- Off/Auto/On
   wake_up_brightness          = { no = 108, kind = "int",  category = "LIGHT", default = 0 },   -- percent
   wake_up_motion_timeout_secs = { no = 128, kind = "int",  category = "LIGHT", default = 600 },

@@ -1,4 +1,7 @@
-name: bigassfans-h-no-light-no-addfan.v7
+name: bigassfans-h-no-light-no-addfan.v20
+metadata:
+  mnmn: SmartThingsCommunity
+  vid: a1b2c3d4-0000-3000-8000-000000000002
 components:
   - id: main
     label: "Fan"
@@ -7,10 +10,6 @@ components:
         version: 1
       - id: fanSpeed
         version: 1
-        config:
-          values:
-            - key: "fanSpeed.value"
-              range: [0, 7]
       - id: refresh
         version: 1
       - id: examplens.fanMode
@@ -20,8 +19,6 @@ components:
       - id: examplens.whoosh
         version: 1
       - id: examplens.ecoMode
-        version: 1
-      - id: examplens.sleepMode
         version: 1
     categories:
       - name: Fan
@@ -39,13 +36,21 @@ components:
   - id: sleep
     label: "Sleep"
     capabilities:
+      - id: examplens.sleepMode
+        version: 1
       - id: examplens.wakeUpMotionTimeout
         version: 1
       - id: examplens.sleepAutoMode
         version: 1
+      - id: examplens.sleepAutoModeGate
+        version: 1
+      - id: examplens.sleepSpeed
+        version: 1
       - id: examplens.sleepIdealTemperature
         version: 1
       - id: examplens.sleepTimer
+        version: 1
+      - id: examplens.sleepTimerEndSpeed
         version: 1
       - id: examplens.sleepTimerDuration
         version: 1
@@ -55,7 +60,13 @@ components:
         version: 1
       - id: examplens.sleepBrightnessMode
         version: 1
+      - id: examplens.sleepBrightnessModeGate
+        version: 1
+      - id: examplens.sleepBrightnessPercent
+        version: 1
       - id: examplens.wakeUpMode
+        version: 1
+      - id: examplens.wakeUpModeGate
         version: 1
       - id: examplens.wakeUpBrightness
         version: 1
