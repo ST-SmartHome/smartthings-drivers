@@ -1,4 +1,7 @@
-name: bigassfans-h-no-light-no-addfan.v7
+name: bigassfans-h-no-light-no-addfan.v20
+metadata:
+  mnmn: SmartThingsCommunity
+  vid: 453cac00-31c0-330c-a0b9-d0becc393ac2
 components:
   - id: main
     label: "Fan"
@@ -7,10 +10,6 @@ components:
         version: 1
       - id: fanSpeed
         version: 1
-        config:
-          values:
-            - key: "fanSpeed.value"
-              range: [0, 7]
       - id: refresh
         version: 1
       - id: aboutisland47519.fanMode
@@ -20,8 +19,6 @@ components:
       - id: aboutisland47519.whoosh
         version: 1
       - id: aboutisland47519.ecoMode
-        version: 1
-      - id: aboutisland47519.sleepMode
         version: 1
     categories:
       - name: Fan
@@ -39,13 +36,21 @@ components:
   - id: sleep
     label: "Sleep"
     capabilities:
+      - id: aboutisland47519.sleepMode
+        version: 1
       - id: aboutisland47519.wakeUpMotionTimeout
         version: 1
       - id: aboutisland47519.sleepAutoMode
         version: 1
+      - id: aboutisland47519.sleepAutoModeGate
+        version: 1
+      - id: aboutisland47519.sleepSpeed
+        version: 1
       - id: aboutisland47519.sleepIdealTemperature
         version: 1
       - id: aboutisland47519.sleepTimer
+        version: 1
+      - id: aboutisland47519.sleepTimerEndSpeed
         version: 1
       - id: aboutisland47519.sleepTimerDuration
         version: 1
@@ -55,7 +60,13 @@ components:
         version: 1
       - id: aboutisland47519.sleepBrightnessMode
         version: 1
+      - id: aboutisland47519.sleepBrightnessModeGate
+        version: 1
+      - id: aboutisland47519.sleepBrightnessPercent
+        version: 1
       - id: aboutisland47519.wakeUpMode
+        version: 1
+      - id: aboutisland47519.wakeUpModeGate
         version: 1
       - id: aboutisland47519.wakeUpBrightness
         version: 1
