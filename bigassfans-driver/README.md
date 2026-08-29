@@ -77,7 +77,7 @@ query first (see `BafClient.commit_and_verify_more`).
 | 100 | `sleep_fan_mode` | enum | FAN | Off/On/Auto — the Sleep tab's own fan-mode selector, distinct from the main `fan_mode` |
 | 101 | `sleep_speed` | int | FAN | Native 0–7 — the Sleep tab's own current fan speed (shown as "Speed" on the Sleep ON-mode screen), distinct from the main `speed` field |
 | 102 | `sleep_ideal_temp` | int (×100 °C) | FAN | Sleep Auto mode's target temperature (e.g. 2056 = 20.56°C) |
-| 103 | `sleep_brightness_mode` | enum | LIGHT | Off/On/Auto — the light's Sleep preset |
+| 103 | `sleep_brightness_mode` | enum | LIGHT | Off/On/Auto — the light's Sleep preset (an earlier pass guessed Off/Dim/Auto from the pcap alone; corrected via a real app screenshot) |
 | 104 | `sleep_brightness_percent` | int | LIGHT | 0–100%, Sleep preset brightness — pairs with `sleep_brightness_mode` the same way `wake_up_brightness` pairs with `wake_up_mode` |
 | 107 | `wake_up_mode` | enum | LIGHT | Off/On/Auto — the light's Wake Up preset |
 | 108 | `wake_up_brightness` | int | LIGHT | 0–100%, Wake Up preset brightness |
@@ -131,14 +131,33 @@ items.
     command and the newer `turnOn`/`turnOff` pair; only the latter is
     wired to the current presentation.
   - `sleep` — the Sleep tab's own sub-settings (see the field table
-    above for exact numbers): `sleepAutoMode` (Off/On/Auto fan mode),
-    `sleepIdealTemperature`, `sleepTimer` + `sleepTimerDuration`,
-    `sleepReturnToAuto` + `sleepReturnToAutoDuration`,
-    `sleepBrightnessMode` (Off/Dim/Auto, the light's Sleep preset),
+    above for exact numbers): `sleepMode` (the master Sleep Mode switch,
+    a physical remote button — MORE-push only, same mechanism as
+    `ledIndicators`/etc above, unlike everything else in this list),
+    `sleepAutoMode` (Off/On/Auto fan mode) + `sleepSpeed`,
+    `sleepIdealTemperature`, `sleepTimer` + `sleepTimerEndSpeed` +
+    `sleepTimerDuration`, `sleepReturnToAuto` +
+    `sleepReturnToAutoDuration`, `sleepBrightnessMode` (Off/On/Auto, the
+    light's Sleep preset) + `sleepBrightnessPercent`,
     `wakeUpMode`/`wakeUpBrightness`/`wakeUpMotionTimeout` (the light's
-    Wake Up preset). All ten are directly queryable under FAN/LIGHT,
-    unlike `sleepMode`/`ledIndicators`/etc above — no MORE-push
-    mechanism needed, just the normal commit-then-verify path.
+    Wake Up preset). All but `sleepMode` are directly queryable under
+    FAN/LIGHT — no MORE-push mechanism needed, just the normal
+    commit-then-verify path.
+
+    The whole section collapses down to just the `sleepMode` tile when
+    Sleep Mode is off, via a hand-assembled `visibleCondition` Device
+    Configuration (`config.yml`'s embedded `config:` block doesn't
+    support this — see the code comments in `init.lua`/
+    `apply_sleep_status` for the full mechanism and its platform
+    incompatibilities). Since `sleepMode` and `sleepAutoMode`/
+    `sleepBrightnessMode`/`wakeUpMode` are independent fields with no
+    real coupling in the protocol, three headless "gate" capabilities
+    (`sleepAutoModeGate`, `sleepBrightnessModeGate`, `wakeUpModeGate` —
+    never rendered themselves, no presentation) fold `sleepMode`'s state
+    into a value the sub-fields' `visibleCondition`s can actually chain
+    on; each fails *open* (stays visible) if `sleepMode`'s own MORE-push
+    value hasn't been captured yet, rather than collapsing the whole
+    section on every driver restart.
   - Preferences: "Manual IP Override" (`ipAddress`, sentinel
     `0.0.0.0` meaning "use the mDNS-discovered address"), `pollInterval`,
     "Hide 'Add Another Fan' Button" (`hideAddFan`), and "No Physical
