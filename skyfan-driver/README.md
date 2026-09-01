@@ -53,7 +53,7 @@ function" endpoint, which only showed 4 of these 8):
 | 8 | `fan_direction` | enum | forward/reverse | main `skyfanDirection` (stop-first safety interlock — see Changelog) |
 | 15 | `light` | bool | — | light `switch` |
 | 16 | `bright_value` | int | 1–5 | light `switchLevel` (scaled to 0–100%) |
-| 19 | `work_mode` | enum | Coolwhite/Naturalwhite/Warmwhite | light `skyfanColorTemp` (custom 3-preset capability — this is a genuine push-button 3-state hardware setting, not a continuous dial, so the standard `colorTemperature` capability originally used here was replaced; see Changelog) |
+| 19 | `work_mode` | enum | Coolwhite/Naturalwhite/Warmwhite | light `skyfanColorTemp` (custom 3-preset capability, not a continuous dial — see Changelog) |
 | 22 | `countdown_set` | enum | cancel, 1h–12h | main `skyfanSleepTimer` |
 
 ## Architecture
