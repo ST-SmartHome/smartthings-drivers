@@ -159,7 +159,15 @@ a commit on a connection that opened with an identity query first.
   polling (queries `FAN`, `LIGHT`, and `SENSORS` each cycle over one
   shared connection, wrapped in `pcall` — an uncaught error here would
   otherwise stop the recurring poll timer from ever registering, silently
-  killing polling for good, not just for one cycle).
+  killing polling for good, not just for one cycle). `ensure_light_child`
+  checks the fan's own reported `has_light`/`has_uplight` (a nested
+  `capabilities` submessage, SENSORS category field 17) before creating
+  a light-child device at all, rather than doing so unconditionally —
+  a direct synchronous query at the point of decision, since it runs
+  before the first poll cycle ever completes and there's no cached data
+  to check yet on a fan's first pairing. Fails open (creates the light
+  child, prior behavior) on any query failure — only a successful query
+  that positively reports no light skips creation.
 
 ## Development approach: verify offline before touching the hub
 
@@ -176,8 +184,11 @@ script, and unit-test the Lua wire-format code against it directly.
 
 ## Known open items
 
-- Only tested against two real fans, both the same model/firmware —
-  behavior on other Haiku/i6 models (e.g. no light kit) is unconfirmed.
+- Only tested against two real fans, both the same model/firmware, both
+  with a physical light — a no-light unit gets its light-child device
+  creation skipped via a real capability check (see Architecture), but
+  that check has only been verified via decode logic against real
+  has-light bytes, not tested end-to-end against an actual no-light fan.
 - `setFanSpeed` also sets `fan_mode` (nonzero → ON, zero → OFF), a UX
   choice, not a confirmed firmware coupling.
 - Whoosh/eco/comfort-mode interactions with each other aren't modeled.

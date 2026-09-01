@@ -65,6 +65,11 @@ editing a schedule entry) remains completely unknown.
 
 ## `Capabilities` submessage (field 17, SENSORS category)
 
+Actively used, not just documented: `ensure_light_child` queries this
+field directly before creating a light-child device, skipping creation
+if `has_light`/`has_uplight` both come back false — see `baf.
+decode_light_capability` in `src/baf_protocol.lua`.
+
 A nested submessage reporting hardware capability flags. Per the upstream
 `aiobafi6.proto`, only 4 sub-fields are named: `has_comfort1`=1,
 `has_comfort3`=3, `has_light`=4, `has_uplight`=6 (the last one specific
