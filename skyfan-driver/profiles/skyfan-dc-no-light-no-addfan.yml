@@ -9,11 +9,11 @@ components:
         version: 1
       - id: refresh
         version: 1
-      - id: aboutisland47519.skyfanMode
+      - id: examplens.skyfanMode
         version: 1
-      - id: aboutisland47519.skyfanDirection
+      - id: examplens.skyfanDirection
         version: 1
-      - id: aboutisland47519.skyfanSleepTimer
+      - id: examplens.skyfanSleepTimer
         version: 1
     categories:
       - name: Fan

@@ -8,22 +8,22 @@ local baf = require "baf_protocol"
 
 local POLL_TIMER_FIELD = "poll_timer"
 
-local FAN_MODE_CAP = capabilities["aboutisland47519.fanMode"]
-local FAN_DIRECTION_CAP = capabilities["aboutisland47519.fanDirection"]
-local WHOOSH_CAP = capabilities["aboutisland47519.whoosh"]
-local ECO_CAP = capabilities["aboutisland47519.ecoMode"]
-local LED_INDICATORS_CAP = capabilities["aboutisland47519.ledIndicators"]
-local FAN_BEEP_CAP = capabilities["aboutisland47519.fanBeep"]
-local LEGACY_IR_REMOTE_CAP = capabilities["aboutisland47519.legacyIrRemote"]
-local SLEEP_MODE_CAP = capabilities["aboutisland47519.sleepMode"]
-local ADD_ANOTHER_CAP = capabilities["aboutisland47519.addAnotherFan"]
+local FAN_MODE_CAP = capabilities["examplens.fanMode"]
+local FAN_DIRECTION_CAP = capabilities["examplens.fanDirection"]
+local WHOOSH_CAP = capabilities["examplens.whoosh"]
+local ECO_CAP = capabilities["examplens.ecoMode"]
+local LED_INDICATORS_CAP = capabilities["examplens.ledIndicators"]
+local FAN_BEEP_CAP = capabilities["examplens.fanBeep"]
+local LEGACY_IR_REMOTE_CAP = capabilities["examplens.legacyIrRemote"]
+local SLEEP_MODE_CAP = capabilities["examplens.sleepMode"]
+local ADD_ANOTHER_CAP = capabilities["examplens.addAnotherFan"]
 
 -- Sleep/Wake Up sub-settings (2026-08-27) -- see baf_protocol.lua for the
 -- field-decode writeup and project-status memory for how each was
 -- confirmed. All read via the normal FAN/LIGHT category poll (these are
 -- directly queryable, unlike sleepMode/ledIndicators/etc above), written
 -- via the normal send_commit/verify_commit path.
-local SLEEP_FAN_MODE_CAP = capabilities["aboutisland47519.sleepAutoMode"]
+local SLEEP_FAN_MODE_CAP = capabilities["examplens.sleepAutoMode"]
 -- Headless mirror of sleepAutoMode's own value (2026-08-29), never shown
 -- in the app itself (no detailView entry) -- exists purely so the 7
 -- sub-fields that need to gate on "is Sleep Auto Mode On/Auto" can
@@ -34,27 +34,27 @@ local SLEEP_FAN_MODE_CAP = capabilities["aboutisland47519.sleepAutoMode"]
 -- regardless of hideOnUnmatch's value (tried both true and false, no
 -- difference). Breaking the "referenced by" relationship via this mirror
 -- is the workaround -- see project-status memory for the full writeup.
-local SLEEP_FAN_MODE_GATE_CAP = capabilities["aboutisland47519.sleepAutoModeGate"]
-local SLEEP_SPEED_CAP = capabilities["aboutisland47519.sleepSpeed"]
-local SLEEP_IDEAL_TEMP_CAP = capabilities["aboutisland47519.sleepIdealTemperature"]
-local SLEEP_TIMER_CAP = capabilities["aboutisland47519.sleepTimer"]
-local SLEEP_TIMER_END_SPEED_CAP = capabilities["aboutisland47519.sleepTimerEndSpeed"]
-local SLEEP_TIMER_DURATION_CAP = capabilities["aboutisland47519.sleepTimerDuration"]
-local SLEEP_RETURN_TO_AUTO_CAP = capabilities["aboutisland47519.sleepReturnToAuto"]
-local SLEEP_RETURN_TO_AUTO_DURATION_CAP = capabilities["aboutisland47519.sleepReturnToAutoDuration"]
-local SLEEP_BRIGHTNESS_MODE_CAP = capabilities["aboutisland47519.sleepBrightnessMode"]
+local SLEEP_FAN_MODE_GATE_CAP = capabilities["examplens.sleepAutoModeGate"]
+local SLEEP_SPEED_CAP = capabilities["examplens.sleepSpeed"]
+local SLEEP_IDEAL_TEMP_CAP = capabilities["examplens.sleepIdealTemperature"]
+local SLEEP_TIMER_CAP = capabilities["examplens.sleepTimer"]
+local SLEEP_TIMER_END_SPEED_CAP = capabilities["examplens.sleepTimerEndSpeed"]
+local SLEEP_TIMER_DURATION_CAP = capabilities["examplens.sleepTimerDuration"]
+local SLEEP_RETURN_TO_AUTO_CAP = capabilities["examplens.sleepReturnToAuto"]
+local SLEEP_RETURN_TO_AUTO_DURATION_CAP = capabilities["examplens.sleepReturnToAutoDuration"]
+local SLEEP_BRIGHTNESS_MODE_CAP = capabilities["examplens.sleepBrightnessMode"]
 -- Headless mirrors of sleepBrightnessMode/wakeUpMode (2026-08-29), same
 -- pattern and same reason as SLEEP_FAN_MODE_GATE_CAP above: sleepMode
 -- (the master Sleep Mode switch) has no effect on sleepBrightnessMode/
 -- wakeUpMode's own real value, so sleepBrightnessPercent/wakeUpBrightness/
 -- wakeUpMotionTimeout need to gate on THESE instead if they're to hide
 -- when Sleep Mode is off. See apply_sleep_status for the fold-in logic.
-local SLEEP_BRIGHTNESS_MODE_GATE_CAP = capabilities["aboutisland47519.sleepBrightnessModeGate"]
-local SLEEP_BRIGHTNESS_PERCENT_CAP = capabilities["aboutisland47519.sleepBrightnessPercent"]
-local WAKE_UP_MODE_CAP = capabilities["aboutisland47519.wakeUpMode"]
-local WAKE_UP_MODE_GATE_CAP = capabilities["aboutisland47519.wakeUpModeGate"]
-local WAKE_UP_BRIGHTNESS_CAP = capabilities["aboutisland47519.wakeUpBrightness"]
-local WAKE_UP_MOTION_TIMEOUT_CAP = capabilities["aboutisland47519.wakeUpMotionTimeout"]
+local SLEEP_BRIGHTNESS_MODE_GATE_CAP = capabilities["examplens.sleepBrightnessModeGate"]
+local SLEEP_BRIGHTNESS_PERCENT_CAP = capabilities["examplens.sleepBrightnessPercent"]
+local WAKE_UP_MODE_CAP = capabilities["examplens.wakeUpMode"]
+local WAKE_UP_MODE_GATE_CAP = capabilities["examplens.wakeUpModeGate"]
+local WAKE_UP_BRIGHTNESS_CAP = capabilities["examplens.wakeUpBrightness"]
+local WAKE_UP_MOTION_TIMEOUT_CAP = capabilities["examplens.wakeUpMotionTimeout"]
 
 local OFF_ON_AUTO_TO_STRING = { [0] = "Off", [1] = "On", [2] = "Auto" }
 local STRING_TO_OFF_ON_AUTO = { Off = 0, On = 1, Auto = 2 }
@@ -226,7 +226,7 @@ local function apply_sleep_status(device, fan, light)
   -- poll cycles if one category's query failed) -- see the fold-in note
   -- on sleepAutoModeGate above for why "Off" is the only value that
   -- forces a hide and nil/anything else fails open.
-  local sleep_mode_state = device:get_latest_state("sleep", "aboutisland47519.sleepMode", "sleepMode")
+  local sleep_mode_state = device:get_latest_state("sleep", "examplens.sleepMode", "sleepMode")
   if fan then
     local sleep_fan_mode_str = OFF_ON_AUTO_TO_STRING[fan.sleep_fan_mode] or "Off"
     local gate_value = sleep_fan_mode_str

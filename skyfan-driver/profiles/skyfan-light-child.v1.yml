@@ -3,7 +3,7 @@ components:
   - id: main
     label: "Light"
     capabilities:
-      - id: aboutisland47519.skyfanColorTemp
+      - id: examplens.skyfanColorTemp
         version: 1
       - id: switch
         version: 1

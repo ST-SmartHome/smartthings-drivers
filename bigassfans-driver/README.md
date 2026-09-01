@@ -125,7 +125,7 @@ items.
     `sleepMode` moved to the `sleep` component — see below.
   - `light` — `switch`, `switchLevel` (0–100%, maps directly to the
     device's own `light_brightness_percent` field, no scaling needed).
-  - `management` — `aboutisland47519.addAnotherFan`, the same custom
+  - `management` — `examplens.addAnotherFan`, the same custom
     capability (and already-correct presentation) reused from
     another driver in this workspace — capability IDs are account-wide,
     not per-driver.

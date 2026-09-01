@@ -9,18 +9,18 @@ components:
         version: 1
       - id: refresh
         version: 1
-      - id: aboutisland47519.skyfanMode
+      - id: examplens.skyfanMode
         version: 1
-      - id: aboutisland47519.skyfanDirection
+      - id: examplens.skyfanDirection
         version: 1
-      - id: aboutisland47519.skyfanSleepTimer
+      - id: examplens.skyfanSleepTimer
         version: 1
     categories:
       - name: Fan
   - id: light
     label: "Light"
     capabilities:
-      - id: aboutisland47519.skyfanColorTemp
+      - id: examplens.skyfanColorTemp
         version: 1
       - id: switch
         version: 1
@@ -31,7 +31,7 @@ components:
   - id: management
     label: "Manage"
     capabilities:
-      - id: aboutisland47519.addAnotherFan
+      - id: examplens.addAnotherFan
         version: 1
 preferences:
   - title: "Fan IP Address"

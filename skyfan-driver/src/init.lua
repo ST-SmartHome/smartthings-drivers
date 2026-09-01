@@ -7,11 +7,11 @@ local TuyaClient = require "tuya_client"
 
 local POLL_TIMER_FIELD = "poll_timer"
 
-local MODE_CAP = capabilities["aboutisland47519.skyfanMode"]
-local DIRECTION_CAP = capabilities["aboutisland47519.skyfanDirection"]
-local SLEEP_TIMER_CAP = capabilities["aboutisland47519.skyfanSleepTimer"]
-local ADD_ANOTHER_CAP = capabilities["aboutisland47519.addAnotherFan"]
-local COLOR_TEMP_CAP = capabilities["aboutisland47519.skyfanColorTemp"]
+local MODE_CAP = capabilities["examplens.skyfanMode"]
+local DIRECTION_CAP = capabilities["examplens.skyfanDirection"]
+local SLEEP_TIMER_CAP = capabilities["examplens.skyfanSleepTimer"]
+local ADD_ANOTHER_CAP = capabilities["examplens.addAnotherFan"]
+local COLOR_TEMP_CAP = capabilities["examplens.skyfanColorTemp"]
 
 -- work_mode (DP 19) is a genuine 3-value enum on the device, not a
 -- continuous Kelvin range — the physical remote controls it as a push

@@ -19,7 +19,7 @@
 --     known IP; the "Manual IP Override" preference lets the user point
 --     it at a real address, or it self-heals automatically once mDNS
 --     actually finds it (see below). Reuses the same custom capability as
---     the Skyfan driver (aboutisland47519.addAnotherFan) — capability IDs
+--     the Skyfan driver (examplens.addAnotherFan) — capability IDs
 --     are account-wide, not per-driver.
 --
 -- Every discovery pass also refreshes the persisted IP of already-known

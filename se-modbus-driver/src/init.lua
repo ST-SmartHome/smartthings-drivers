@@ -6,8 +6,8 @@ local discovery = require "discovery"
 local SolarEdge = require "solaredge"
 
 local POLL_TIMER_FIELD = "poll_timer"
-local STATUS_CAP = capabilities["aboutisland47519.inverterStatus"]
-local GRID_ENERGY_CAP = capabilities["aboutisland47519.gridEnergy"]
+local STATUS_CAP = capabilities["examplens.inverterStatus"]
+local GRID_ENERGY_CAP = capabilities["examplens.gridEnergy"]
 
 local function get_settings(device)
   local prefs = device.preferences or {}
