@@ -12,10 +12,9 @@ SmartThings Community post: https://community.smartthings.com/t/st-edge-lan-driv
 
 Confirmed live against real hardware: connects, decrypts and parses status
 correctly, and every command (fan on/off, speed, mode, direction, sleep
-timer, light on/off, brightness, color temperature) has been tested. All 8
-physical fans in the house have credentials on file and are added as
-devices. Multi-fan support is done via an explicit "Add another fan"
-button rather than automatic discovery — see Architecture.
+timer, light on/off, brightness, color temperature) has been tested.
+Multi-fan support is done via an explicit "Add another fan" button rather
+than automatic discovery — see Architecture.
 
 Each fan's light is its own separate SmartThings device (a child device,
 not a component) — done for Alexa visibility, since Alexa discovers by
@@ -27,15 +26,12 @@ Deployed as `skyfan-tuya-lan`, driverId
 (`781ea3f1-a95c-492f-9952-59ef19f43505`), installed on hub
 `c215e4a2-98e7-4272-9cd8-ebf178079631`. 4 profile variants exist, chosen
 automatically per-device from preferences and whether a light child has
-been created — **all 8 real fans currently resolve to
-`skyfan-dc-no-light-no-addfan.v2`** (confirmed via live preferences, not
-assumed from the file name), since every fan already has a light child
-device and `hideAddFan` is set on all of them. `skyfan-dc-no-light.v2` is
-the other genuinely reachable state (same, but with the "Add another fan"
-button still showing); `skyfan-dc.v6`/`skyfan-dc-no-addfan.v1` (both
-still carrying an inline `light` component) are only ever a device's
-profile for the few seconds between first pairing and its light child
-appearing.
+been created — once a fan has a light child device, it lands on
+`skyfan-dc-no-light.v2` or `skyfan-dc-no-light-no-addfan.v2` depending on
+the `hideAddFan` preference; `skyfan-dc.v6`/`skyfan-dc-no-addfan.v1`
+(both still carrying an inline `light` component) are only ever a
+device's profile for the few seconds between first pairing and its light
+child appearing.
 
 **Deploy workflow** (repackaging requires all three steps, every time —
 `install` alone on an already-installed driver is a no-op):
@@ -208,5 +204,5 @@ oscillation) — both from re-evaluating the profile switch outside
 capability, since the real hardware is a 3-state push-button, not a
 continuous dial.
 
-**2026-08-04 — initial bring-up complete**, all 8 physical fans'
-credentials obtained and confirmed working end-to-end.
+**2026-08-04 — initial bring-up complete**, confirmed working end-to-end
+against real hardware.
