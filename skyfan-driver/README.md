@@ -148,7 +148,7 @@ Skyfan device, then configure the new device's preferences the same way.
 
 Watch live with:
 ```bash
-smartthings edge:drivers:logcat b079f7d0-c6fd-4704-b760-131a6b660307 --hub-address <your-hub-ip> --token <Smart-Things-Personal-Access-Token>
+smartthings edge:drivers:logcat b079f7d0-c6fd-4704-b760-131a6b660307 --hub-address <your-hub-ip> --token <pat>
 ```
 
 ## Changelog
