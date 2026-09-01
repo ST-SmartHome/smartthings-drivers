@@ -128,8 +128,6 @@ function" endpoint, which only showed 4 of these 8):
 
 ## Known open items
 
-- No-light-hardware units (`product_name: "Skyfan DC-no light"` via Tuya
-  Cloud API): behavior confirmed correct via the `noLight` preference.
 - `countdown_set`'s real-world behavior on the physical fan hasn't been
   cross-checked against what the enum values actually do.
 - Protocol 3.4 support isn't implemented — only needed if a fan is ever
