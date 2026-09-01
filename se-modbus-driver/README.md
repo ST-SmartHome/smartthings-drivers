@@ -14,7 +14,7 @@ device is created — see `profiles/solaredge-inverter.yml`. `init.lua`'s
 `infoChanged` handler picks up preference changes and (re)starts polling
 against the configured address.
 
-## Grid import/export meter (optional hardware)
+## Grid import/export meter
 
 If your installation has a SolarEdge production/consumption meter attached
 (SunSpec model 201–204 — many residential installs do), the driver reads
@@ -76,8 +76,8 @@ unit ID (typically `1`), and poll interval (30s by default).
 | `main` | `temperatureMeasurement` | Inverter temperature (°C) |
 | `main` | `inverterStatus` | Operating status (MPPT/THROTTLED/FAULT/etc — see below) |
 | `main` | `refresh` | Manual refresh button |
-| `grid` (optional hardware) | `powerMeter` | Net grid power, signed — see "Grid import/export meter" above |
-| `grid` (optional hardware) | `gridEnergy` | Lifetime exported/imported energy (kWh) |
+| `grid` | `powerMeter` | Net grid power, signed — see "Grid import/export meter" above |
+| `grid` | `gridEnergy` | Lifetime exported/imported energy (kWh) |
 | `dc` | `voltageMeasurement` | DC voltage straight off the solar panels, before inversion |
 | `dc` | `powerMeter` | DC power straight off the solar panels, before inversion |
 
