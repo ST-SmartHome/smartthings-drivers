@@ -53,13 +53,13 @@ function" endpoint, which only showed 4 of these 8):
 | DP ID | Code | Type | Values | Capability |
 |---|---|---|---|---|
 | 1 | `switch` | bool | — | main `switch` |
-| 2 | `mode` | enum | Normal/ECO/Sleep | main `examplens.skyfanMode` |
+| 2 | `mode` | enum | Normal/ECO/Sleep | main `skyfanMode` |
 | 3 | `fan_speed` | int | 1–5 | main `fanSpeed` |
-| 8 | `fan_direction` | enum | forward/reverse | main `examplens.skyfanDirection` |
+| 8 | `fan_direction` | enum | forward/reverse | main `skyfanDirection` |
 | 15 | `light` | bool | — | light `switch` |
 | 16 | `bright_value` | int | 1–5 | light `switchLevel` (scaled to 0–100%) |
-| 19 | `work_mode` | enum | Coolwhite/Naturalwhite/Warmwhite | light `examplens.skyfanColorTemp` (custom 3-preset capability — this is a genuine push-button 3-state hardware setting, not a continuous dial, so the standard `colorTemperature` capability originally used here was replaced; see Changelog) |
-| 22 | `countdown_set` | enum | cancel, 1h–12h | main `examplens.skyfanSleepTimer` |
+| 19 | `work_mode` | enum | Coolwhite/Naturalwhite/Warmwhite | light `skyfanColorTemp` (custom 3-preset capability — this is a genuine push-button 3-state hardware setting, not a continuous dial, so the standard `colorTemperature` capability originally used here was replaced; see Changelog) |
+| 22 | `countdown_set` | enum | cancel, 1h–12h | main `skyfanSleepTimer` |
 
 ## Architecture
 
@@ -70,15 +70,15 @@ function" endpoint, which only showed 4 of these 8):
 - `profiles/skyfan-dc.yml` — three components:
   - `main` — fan `switch`, `fanSpeed`, `refresh`, and the three custom
     fan-control capabilities (mode/direction/sleep timer).
-  - `light` — `switch`, `switchLevel`, `examplens.skyfanColorTemp`
+  - `light` — `switch`, `switchLevel`, `skyfanColorTemp`
     (present only until a fan's light child is created — see below).
-  - `management` — just the `examplens.addAnotherFan` button, kept
+  - `management` — just the `addAnotherFan` button, kept
     in its own trailing component specifically so it renders at the
     bottom of the device screen (component declaration order controls
     on-screen tile order).
 - `profiles/skyfan-light-child.v1.yml` — the auto-created light child
   device's own profile (`switch`, `switchLevel`,
-  `examplens.skyfanColorTemp`). Every fan with a physical light
+  `skyfanColorTemp`). Every fan with a physical light
   automatically gets one of these as a separate SmartThings device (DNI
   `<parent-dni>-light`), so the light is visible to Alexa, which discovers
   by device rather than by component. The parent fan device then migrates
@@ -279,7 +279,7 @@ to re-trigger). Fixed by moving all profile-switch logic to run only from
 
 **2026-08-18 — light color control rebuilt.** The standard `colorTemperature`
 capability was replaced with a custom 3-preset capability
-(`examplens.skyfanColorTemp`), since the real hardware is a 3-state
+(`skyfanColorTemp`), since the real hardware is a 3-state
 push-button (Warmwhite/Naturalwhite/Coolwhite), not a continuous dial —
 see the DPS table above.
 
