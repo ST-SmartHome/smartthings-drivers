@@ -10,25 +10,32 @@ SmartThings Community post: https://community.smartthings.com/t/st-edge-lan-driv
 
 ## Status: working end-to-end
 
-Confirmed live against the real device: connects, decrypts and parses
-status correctly, and every command (fan on/off, speed, mode, direction,
-sleep timer, light on/off, brightness, color temperature) has been tested.
-All three custom capability tiles (mode/direction/sleep timer) render
-correctly in the app. Multi-fan support is done via an explicit "Add
-another fan" button rather than automatic discovery — see Architecture.
+Confirmed live against real hardware: connects, decrypts and parses status
+correctly, and every command (fan on/off, speed, mode, direction, sleep
+timer, light on/off, brightness, color temperature) has been tested. All 8
+physical fans in the house have credentials on file and are added as
+devices. Multi-fan support is done via an explicit "Add another fan"
+button rather than automatic discovery — see Architecture.
+
+Each fan's light is its own separate SmartThings device (a child device,
+not a component) — done for Alexa visibility, since Alexa discovers by
+device rather than by component. This happens automatically the first
+time the driver restarts after a fan is added; no preference to toggle.
 
 Deployed as `skyfan-tuya-lan`, driverId
 `b079f7d0-c6fd-4704-b760-131a6b660307`, channel `Drivers`
 (`781ea3f1-a95c-492f-9952-59ef19f43505`), installed on hub
-`c215e4a2-98e7-4272-9cd8-ebf178079631`. Several profile variants now exist
-(`skyfan-dc[-no-light][-no-addfan].v1`, plus `skyfan-light-child.v1` for the
-auto-created light devices — see Changelog), chosen automatically per-device
-from preferences and whether a light child has been created, not a single
-fixed profile.
-
-Each fan's light is automatically split into its own child SmartThings
-device (see the 2026-08-25 Changelog entry) — no action needed, this just
-happens on first driver restart after updating.
+`c215e4a2-98e7-4272-9cd8-ebf178079631`. 4 profile variants exist, chosen
+automatically per-device from preferences and whether a light child has
+been created — **all 8 real fans currently resolve to
+`skyfan-dc-no-light-no-addfan.v2`** (confirmed via live preferences, not
+assumed from the file name), since every fan already has a light child
+device and `hideAddFan` is set on all of them. `skyfan-dc-no-light.v2` is
+the other genuinely reachable state (same, but with the "Add another fan"
+button still showing); `skyfan-dc.v6`/`skyfan-dc-no-addfan.v1` (both
+still carrying an inline `light` component) are only ever a device's
+profile for the few seconds between first pairing and its light child
+appearing.
 
 **Deploy workflow** (repackaging requires all three steps, every time —
 `install` alone on an already-installed driver is a no-op):
@@ -54,8 +61,8 @@ function" endpoint, which only showed 4 of these 8):
 |---|---|---|---|---|
 | 1 | `switch` | bool | — | main `switch` |
 | 2 | `mode` | enum | Normal/ECO/Sleep | main `skyfanMode` |
-| 3 | `fan_speed` | int | 1–5 | main `fanSpeed` |
-| 8 | `fan_direction` | enum | forward/reverse | main `skyfanDirection` |
+| 3 | `fan_speed` | int | 1–5 | main `fanSpeed` (custom 5-label slider — see Changelog) |
+| 8 | `fan_direction` | enum | forward/reverse | main `skyfanDirection` (stop-first safety interlock — see Changelog) |
 | 15 | `light` | bool | — | light `switch` |
 | 16 | `bright_value` | int | 1–5 | light `switchLevel` (scaled to 0–100%) |
 | 19 | `work_mode` | enum | Coolwhite/Naturalwhite/Warmwhite | light `skyfanColorTemp` (custom 3-preset capability — this is a genuine push-button 3-state hardware setting, not a continuous dial, so the standard `colorTemperature` capability originally used here was replaced; see Changelog) |
@@ -67,23 +74,22 @@ function" endpoint, which only showed 4 of these 8):
   permission exists on this platform at all (confirmed empirically, not
   just from docs — see `smartthings-edge-driver-gotchas` memory); don't
   design any feature around the driver calling out to a cloud API.
-- `profiles/skyfan-dc.yml` — three components:
+- `profiles/*.yml` — 4 variants (see Status above). The two `no-light`
+  variants each have their own hand-assembled device-config
+  (`metadata.vid`) — Skyfan's first, added specifically to override
+  `fanSpeed`'s range/labels (see Changelog); the two light-having
+  transient variants have no vid, just a cheaper embedded `config:` range
+  override, since nothing rests on them long enough to justify more.
   - `main` — fan `switch`, `fanSpeed`, `refresh`, and the three custom
     fan-control capabilities (mode/direction/sleep timer).
-  - `light` — `switch`, `switchLevel`, `skyfanColorTemp`
-    (present only until a fan's light child is created — see below).
-  - `management` — just the `addAnotherFan` button, kept
-    in its own trailing component specifically so it renders at the
-    bottom of the device screen (component declaration order controls
-    on-screen tile order).
-- `profiles/skyfan-light-child.v1.yml` — the auto-created light child
-  device's own profile (`switch`, `switchLevel`,
-  `skyfanColorTemp`). Every fan with a physical light
-  automatically gets one of these as a separate SmartThings device (DNI
-  `<parent-dni>-light`), so the light is visible to Alexa, which discovers
-  by device rather than by component. The parent fan device then migrates
-  off its own `light` component onto a light-less profile variant — see
-  the 2026-08-25 Changelog entry for the full mechanism.
+  - `light` (only on the two transient variants) — `switch`,
+    `switchLevel`, `skyfanColorTemp`.
+  - `management` — just the `addAnotherFan` button, kept in its own
+    trailing component specifically so it renders at the bottom of the
+    device screen (component declaration order controls on-screen tile
+    order).
+  - `profiles/skyfan-light-child.v1.yml` — the auto-created light child
+    device's own profile (`switch`, `switchLevel`, `skyfanColorTemp`).
 
   5 preferences: IP, local_key, device ID, protocol version, poll
   interval — every one has an obviously-fake placeholder `default`, which
@@ -114,68 +120,20 @@ function" endpoint, which only showed 4 of these 8):
 - `src/tuya_client.lua` — one-connection-per-request TCP client (connect,
   send, read, close), mirroring the SolarEdge Modbus client's structure.
 - `src/init.lua` — lifecycle handlers, capability command handlers for all
-  8 DPs plus the add-another-fan button, status polling loop (wrapped in
-  `pcall` — an uncaught error in the first poll before the recurring timer
-  is registered would otherwise permanently kill auto-polling for that
-  device, see gotchas memory).
-
-## Bugs found and fixed
-
-Profile validation / packaging:
-
-1. Custom capability enum attributes needed an explicit `default` value in
-   their schema — omitting it produced a generic `"default cannot be
-   null"` error with no indication of which field was the problem. Found
-   by bisecting the profile down to a minimal version and adding pieces
-   back one at a time.
-2. **Every** device preference needs a `default`, even ones with no
-   sensible universal value (`localKey`, `deviceId` are per-device secrets/
-   IDs) — same generic error. Fixed with obviously-fake placeholders
-   (`"0000000000000000"` etc.) and descriptions telling the user to
-   replace them.
-3. Enumeration preference option **keys** must match `^\w+$` (word
-   characters only) — `"3.3"`/`"3.4"` contain a period and were rejected.
-   Changed to `v33`/`v34` as keys, with `"3.3"`/`"3.4"` as the display
-   labels.
-
-Protocol / Lua:
-
-4. PKCS7 padding API misuse — `lockbox.padding.pkcs7` is a bare function,
-   not an object with `.pad`/`.unpad` methods. Fixed by using
-   `cipher.setPadding(PKCS7)` + an argless `.finish()`, and stripping
-   padding by hand after decrypt.
-5. Device-response framing case: some responses carry a clear 4-byte
-   `retcode` field before the ciphertext, distinct from the documented
-   15-byte "3.3" source header — detected by noticing decrypted payload
-   length wasn't a clean multiple of 16, fixed by checking
-   `#encrypted % 16 == 4` and stripping those 4 bytes when present.
-
-Capability presentation:
-
-6. The three custom fan-control capabilities were silently missing from
-   the app's device screen because their presentations lacked top-level
-   `dashboard`/`automation` keys (only `detailView` was set) — a custom
-   capability with an incomplete presentation gets skipped by the
-   auto-generated `detailView` builder, without any error. Fixed by
-   adding empty `dashboard`/`automation` objects to each presentation.
-   Getting the fix to actually show up additionally required reordering
-   the capability list in the profile YAML (a name-only version bump
-   wasn't enough — the auto-generated view is content-hashed by the
-   capability set, not the profile name). Full story in the
-   `smartthings-edge-driver-gotchas` memory.
+  8 DPs plus the add-another-fan button, the light-child-device split,
+  the direction-reversal safety interlock, status polling loop (wrapped
+  in `pcall` — an uncaught error in the first poll before the recurring
+  timer is registered would otherwise permanently kill auto-polling for
+  that device, see gotchas memory).
 
 ## Known open items
 
-- Some fans report `product_name: "Skyfan DC-no light"` via the Tuya
-  Cloud API (vs. `"decomin-3 ceilingfan"` for the rest) — whether this
-  driver's single profile (which always shows light controls) degrades
-  gracefully on those units, or just shows dead controls, is untested.
-- `countdown_set`'s real-world meaning: exposed as a raw enum
-  (cancel/1h–12h) via the custom `skyfanSleepTimer` capability. Not
-  cross-checked against how the fan actually behaves when set.
-- Protocol 3.4 support (payload version-header prefix, HMAC-SHA256
-  instead of CRC32 checksum) isn't implemented — only needed if a fan is
-  ever found that doesn't speak 3.3. None found so far.
+- No-light-hardware units (`product_name: "Skyfan DC-no light"` via Tuya
+  Cloud API): behavior confirmed correct via the `noLight` preference.
+- `countdown_set`'s real-world behavior on the physical fan hasn't been
+  cross-checked against what the enum values actually do.
+- Protocol 3.4 support isn't implemented — only needed if a fan is ever
+  found that doesn't speak 3.3.
 
 ## Adding a fan (in the SmartThings app)
 
@@ -209,80 +167,48 @@ smartthings edge:drivers:logcat b079f7d0-c6fd-4704-b760-131a6b660307 --hub-addre
 
 ## Changelog
 
-**2026-08-25 — each fan's light now gets its own separate SmartThings
-device, plus a real capability-presentation bug fixed.**
+**2026-09-01 — fan-speed slider fix + direction-reversal safety
+interlock.** The native fan speed range (DP3) is 1–5, but the app's
+slider had never been overridden from the stock `fanSpeed` capability's
+default 0–4 — meaning "Off" on the slider actually set speed to 1 (not
+off), and the fan's true top speed was unreachable. Fixed via this
+driver's first-ever hand-assembled device-config, overriding the range to
+1–5 with proper labels (Low / Med-Low / Medium / Med-High / High).
+Separately, `setDirection` now stops the fan and confirms it's actually
+stopped before committing a reversal, instead of committing directly
+while potentially still spinning — ported from a sibling driver after a
+real incident there proved that omission was a genuine risk, not just a
+theoretical one.
 
-- **Light split into a child device (for Alexa).** Alexa discovers by
-  device, not by component, so a fan's light was invisible to Alexa as
-  long as it lived on the fan's own device. Every fan with a physical
-  light now automatically gets a child device (profile
-  `skyfan-light-child.v1`) the first time the driver restarts after
-  updating — no preference to toggle, no manual action. The parent fan
-  device keeps everything else (speed, mode, direction, sleep timer);
-  the light child only handles switch/brightness/color-temp preset. The
-  parent's regular poll cycle pushes fresh status to the child too, so
-  this doesn't add a second TCP connection per cycle. If you see a new
-  device appear next to an existing fan after updating, that's expected
-  — it's the light, not a duplicate fan. (Ported from the same fix
-  already shipped on a sibling driver in this account.)
-- **`skyfanColorTemp` had no capability presentation defined at all** —
-  confirmed via a direct API check (`404 Capability Presentation is not
-  found`). SmartThings' fallback for an unpresented custom capability is
-  a single button with no value picker, which is what was actually
-  showing up in the app as a button that just cycles through colors with
-  no way to pick one directly. Fixed with a proper `displayType: list`
-  3-option presentation (Warm White / Natural White / Cool White),
-  matching the working `skyfanMode`/`skyfanDirection` tiles.
+**2026-08-25/27 — each fan's light now gets its own separate SmartThings
+device.** Alexa discovers by device, not by component, so a fan's light
+was invisible to Alexa as long as it lived on the fan's own device. Every
+fan with a physical light now automatically gets a child device the
+first time the driver restarts after updating. A related bug (4 of 5
+light-having fans stuck showing duplicate light controls after rollout)
+needed a full hub reboot to resolve — the driver process wasn't actually
+restarting on a plain redeploy. Also fixed the same week: `skyfanColorTemp`
+had no capability presentation defined at all, silently falling back to a
+bare cycling button instead of a real Warm/Natural/Cool White picker.
 
-No changes to existing fan speed/mode/direction/sleep-timer behavior.
-Both changes apply automatically once the driver update reaches your
-hub.
+**2026-08-20 — root cause found and fixed for a long-standing, hard-to-
+diagnose write-command failure.** Fan speed/switch/light commands would
+silently time out while status reads always worked — an extensive
+investigation ruled out the network, hub, firewall, and cloud auth before
+finding two real protocol bugs: a missing required Tuya-protocol header
+on writes, and this fan's firmware not implementing the `CONTROL_NEW`
+command at all (needed the older `CONTROL`). Both fixed, confirmed via a
+standalone reference-implementation diff, a Lua test harness, live
+logcat, and physical confirmation on multiple real fans.
 
-**2026-08-20 — root cause found and fixed for a long-standing, hard-to-diagnose
-write-command failure.** Symptom: fan speed/switch/light commands would
-silently time out (`header receive failed: timeout`) while status reads
-always worked fine — looked exactly like a network/hub problem, and an
-extensive investigation ruled out the router, the SmartThings hub,
-firewall/IPS, Tuya cloud auth, and this driver's own code being stale, all
-with hard evidence, before the real cause was found. Two real protocol
-bugs, both required together:
-- `Tuya.encode()` never added the 15-byte clear (unencrypted) header —
-  `"3.3"` + 12 zero bytes — that Tuya protocol 3.2+ requires on every
-  command except `DP_QUERY`/`DP_QUERY_NEW`. `decode()` already knew to
-  *strip* this header from incoming responses; it was just never *added*
-  to outgoing writes.
-- These fans' firmware doesn't implement the `CONTROL_NEW` (0x0D) command
-  at all — it silently TCP-acknowledges the frame and never sends an
-  application response. Switched `TuyaClient.set_dps` to the older
-  `CONTROL` (0x07), which this firmware does support.
+**2026-08-18/19 — no-light profile support added**, plus two real
+profile-switch bugs fixed (a repeating dialog, then a genuine infinite
+oscillation) — both from re-evaluating the profile switch outside
+`device_init`.
 
-Found by running a real reference implementation
-([jasonacox/tinytuya](https://github.com/jasonacox/tinytuya)) standalone
-against a physical fan and diffing its successful write's raw wire bytes
-against this driver's failing one. Confirmed fixed via a standalone
-Lua test harness (this driver's own protocol code run outside
-SmartThings entirely), then via live `logcat` showing genuine DP value
-changes on command, then via physical confirmation on multiple real
-fans. Full technical writeup in the `skyfan-driver-project-status`
-auto-memory entry if this ever needs revisiting.
+**2026-08-18 — light color control rebuilt** as a custom 3-preset
+capability, since the real hardware is a 3-state push-button, not a
+continuous dial.
 
-**2026-08-18/19 — no-light profile support added** for the physical units
-with no light fixture: a `noLight` boolean preference switches the device
-onto a second profile (`skyfan-dc-no-light.v1`) with the `light` component
-omitted entirely. Two real bugs surfaced and were fixed along the way — a
-repeating "capabilities changed" dialog, then a genuine infinite
-oscillation between the two profiles every ~5s — both caused by comparing
-`device.profile.id` (a UUID) against a profile name and/or re-evaluating
-the switch from `info_changed` (which `try_update_metadata` itself appears
-to re-trigger). Fixed by moving all profile-switch logic to run only from
-`device_init` (once per driver restart), never from `info_changed`.
-
-**2026-08-18 — light color control rebuilt.** The standard `colorTemperature`
-capability was replaced with a custom 3-preset capability
-(`skyfanColorTemp`), since the real hardware is a 3-state
-push-button (Warmwhite/Naturalwhite/Coolwhite), not a continuous dial —
-see the DPS table above.
-
-**2026-08-04 — initial bring-up complete**, confirmed working end-to-end
-against real hardware; see "Bugs found and fixed" above for the
-crypto/framing/presentation issues hit along the way.
+**2026-08-04 — initial bring-up complete**, all 8 physical fans'
+credentials obtained and confirmed working end-to-end.
