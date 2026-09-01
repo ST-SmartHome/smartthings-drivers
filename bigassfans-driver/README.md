@@ -18,6 +18,13 @@ scan and confirmed fully working: every capability (fan switch/speed/mode/
 direction/whoosh/eco, light switch/brightness) reads and writes correctly
 against the real devices.
 
+4 profile variants exist, auto-selected per-device from preferences; the
+2 variants where the light is a genuine child device (rather than an
+inline component, briefly the case only in the first seconds after a
+fan's discovery) both carry the full feature set below — Sleep-section
+gating, the Fan+Light combined switch, the collapsible Settings toggle,
+and the labeled fan-speed slider.
+
 ## Protocol details (confirmed empirically against two real fans, not from docs alone)
 
 - **Transport**: plain TCP to port 31415, one connection per request.
@@ -109,9 +116,13 @@ items.
   mDNS service, so `discovery_handler` only fires when something matching
   is actually present.
 - `profiles/bigassfans-h.yml` — five components:
-  - `main` (labeled "Fan+Light" on the live no-light-no-addfan variant)
-    — `switch`, `fanMode` (Off/On/Auto, placed above `fanSpeed`),
-    `fanSpeed` (native range 0–7, not a percentage), `refresh`,
+  - `main` (labeled "Fan+Light" on the two variants with a light child
+    device) — `switch`, `fanMode` (Off/On/Auto, placed above `fanSpeed`),
+    `fanSpeed` (native range 0–7, not a percentage — the stock capability
+    only defines display labels up to its own default 0–4 range, so this
+    driver adds its own 8-entry label override, plain numbers rather than
+    invented tier names since there's no established naming convention
+    for an 8-speed fan), `refresh`,
     `fanDirection` (Forward/Reverse), `whoosh` (Off/On), `ecoMode`
     (Off/On). The plain On/Off switch and Fan Mode's Off transition both
     cascade to the light child device too (a second, separate LIGHT-
