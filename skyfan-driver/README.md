@@ -33,15 +33,7 @@ the `hideAddFan` preference; `skyfan-dc.v6`/`skyfan-dc-no-addfan.v1`
 device's profile for the few seconds between first pairing and its light
 child appearing.
 
-**Deploy workflow** (repackaging requires all three steps, every time —
-`install` alone on an already-installed driver is a no-op):
-```bash
-smartthings edge:drivers:package .
-smartthings edge:channels:assign <driverId> <version> --channel <channelId>
-smartthings edge:drivers:install <driverId> --hub <hubId> --channel <channelId>
-```
-
-## Device facts (verified via Tuya Cloud API, not guessed)
+## Device facts (verified via Tuya Cloud API)
 
 The driver was built and tested against a real physical fan — credentials
 (local IP, `local_key`, device ID) aren't reproduced here since they're
