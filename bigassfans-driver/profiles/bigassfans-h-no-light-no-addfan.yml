@@ -1,10 +1,10 @@
-name: bigassfans-h-no-light-no-addfan.v20
+name: bigassfans-h-no-light-no-addfan.v26
 metadata:
   mnmn: SmartThingsCommunity
-  vid: 453cac00-31c0-330c-a0b9-d0becc393ac2
+  vid: 6f17211d-398f-39d3-bb5b-3a5f3c70a569
 components:
   - id: main
-    label: "Fan"
+    label: "Fan+Light"
     capabilities:
       - id: switch
         version: 1
@@ -23,8 +23,10 @@ components:
     categories:
       - name: Fan
   - id: settings
-    label: "Settings"
+    label: "Device Settings"
     capabilities:
+      - id: examplens.showSettings
+        version: 1
       - id: examplens.ledIndicators
         version: 1
       - id: examplens.fanBeep

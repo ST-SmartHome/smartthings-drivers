@@ -16,6 +16,14 @@ local LED_INDICATORS_CAP = capabilities["examplens.ledIndicators"]
 local FAN_BEEP_CAP = capabilities["examplens.fanBeep"]
 local LEGACY_IR_REMOTE_CAP = capabilities["examplens.legacyIrRemote"]
 local SLEEP_MODE_CAP = capabilities["examplens.sleepMode"]
+-- Phantom switch (2026-08-29, user request): purely local UI state, no
+-- protocol commit at all -- unlike sleepMode/ledIndicators/etc above,
+-- there's no real hardware behind this at all, just a stored value other
+-- tiles' visibleCondition gates on. Deliberately chosen over sleepMode's
+-- MORE_PUSH pattern for anything gate-only like this: device_init can
+-- safely seed a real default immediately (see below), no stuck-null
+-- window to fail open around.
+local SHOW_SETTINGS_CAP = capabilities["examplens.showSettings"]
 local ADD_ANOTHER_CAP = capabilities["examplens.addAnotherFan"]
 
 -- Sleep/Wake Up sub-settings (2026-08-27) -- see baf_protocol.lua for the
@@ -638,10 +646,10 @@ end
 -- a profile-name bump has TWO places that must move together, the YAML
 -- file's own `name:` and whatever constant here requests it by name --
 -- treat them as one edit, never one without the other.
-local WITH_ADDFAN_PROFILE = "bigassfans-h.v7"
-local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v7"
-local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v7"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v20"
+local WITH_ADDFAN_PROFILE = "bigassfans-h.v8"
+local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v8"
+local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v9"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v26"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
 -- All four reset to nil after the 2026-08-27 v2->v3 bump above (a new
@@ -724,6 +732,18 @@ end
 --- effectively-separate steps even though the code is textually
 --- adjacent, so a failed/delayed creation can never leave the light
 --- orphaned mid-migration.
+---
+--- 2026-09-01 — added a real capability check (fan's own reported
+--- has_light/has_uplight, via the SENSORS-category `capabilities` field)
+--- before creating, rather than doing so unconditionally for every fan.
+--- This runs BEFORE start_polling (later in device_init), so there is no
+--- cached poll data to check yet on a fan's very first pairing — the
+--- only way to gate the actual creation decision on real data is a
+--- direct, synchronous query right here, not a cache. Deliberately
+--- fails OPEN (creates the light child, today's prior behavior) on any
+--- query failure/timeout — an unreachable fan during pairing shouldn't
+--- silently end up without a light child it may well have; only a
+--- successful query that positively reports no light skips creation.
 local function ensure_light_child(driver, device)
   if is_light_child(device) then
     return -- a child never spawns its own child
@@ -733,6 +753,24 @@ local function ensure_light_child(driver, device)
   end
   if find_light_child(driver, device) then
     return -- already created
+  end
+  local ip = resolve_ip(device)
+  if ip then
+    local results, query_err = BafClient.query_multi(ip, { "SENSORS" }, 5)
+    local sensors = results and results.SENSORS
+    if sensors and sensors.capabilities ~= nil then
+      if not baf.decode_light_capability(sensors.capabilities) then
+        log.info("BAF fan " .. device.id ..
+          " reports no light capability (has_light/has_uplight both false) — skipping light-child creation")
+        return
+      end
+    else
+      log.info("BAF light-capability query for " .. device.id ..
+        " came back without a capabilities field (" .. tostring(query_err) ..
+        ") — creating light child anyway (fail-open)")
+    end
+  else
+    log.info("BAF light-capability check attempted before device has a known IP — creating light child anyway (fail-open)")
   end
   local label = (device.label or device.id) .. " Light"
   local ok, err = driver:try_create_device({
@@ -762,6 +800,22 @@ local function device_init(driver, device)
   end
   ensure_correct_profile(driver, device)
   ensure_light_child(driver, device)
+  -- Seed showSettings' default here rather than leaving it to whatever
+  -- happens first -- unlike sleepMode (MORE_PUSH, genuinely unknown
+  -- until a real command), this is pure local state with nothing to
+  -- wait on, so device_init can safely set it once. Guarded by
+  -- get_latest_state so a restart never clobbers an explicit choice the
+  -- user already made -- only a device that's never had this attribute
+  -- at all gets the default. Only meaningful on profiles that actually
+  -- declare the settings component/capability; a no-op emit on one that
+  -- doesn't (older profile variants) is silently dropped, same as any
+  -- other capability/component mismatch in this driver.
+  local settings_component = device.profile.components.settings
+  if settings_component and
+      device:get_latest_state("settings", "examplens.showSettings", "showSettings") == nil then
+    device:emit_component_event(settings_component,
+      SHOW_SETTINGS_CAP.showSettings({ value = "On" }))
+  end
   start_polling(driver, device)
 end
 
@@ -785,17 +839,41 @@ end
 
 -- ===== Capability commands =====
 
+--- Cascades the light child's power state to match a fan on/off change —
+--- "Fan+Light" combined control (2026-08-29, user request): turning the
+--- fan off from the main switch or the Fan Mode control also turns the
+--- light off, and back on again from either control, since the whole
+--- physical unit is what most people mean by "turn the fan off," not
+--- just the motor. A separate commit to the light child, never merged
+--- into the fan's own commit — this driver always keeps FAN and LIGHT
+--- fields in their own single-category commits (see
+--- category_of_props/verify_commit above), never mixed in one, so the
+--- existing verify/re-emit logic doesn't need to learn a mixed case.
+--- No-ops silently if this fan has no light child yet (e.g. mid-split).
+local function cascade_light(driver, device, turn_on)
+  local light_child = find_light_child(driver, device)
+  if not light_child then
+    return
+  end
+  send_commit(driver, light_child, {
+    light_mode = turn_on and baf.OFF_ON_AUTO.ON or baf.OFF_ON_AUTO.OFF,
+  }, true)
+end
+
 --- command.component == "light" covers a not-yet-split device (still on
 --- a profile with both main+light components); is_light_child(device)
 --- covers a split device's separate light device (whose only component
 --- is "main", so the component check alone would wrongly fall through to
 --- the fan branch). Both checks needed side by side — devices in either
---- state can exist at once across a household mid-migration.
+--- state can exist at once across a household mid-migration. Neither
+--- branch here is itself the light-child device, so cascade_light is
+--- only ever reached from the fan side, never recursing into the light.
 local function switch_on(driver, device, command)
   if is_light_child(device) or command.component == "light" then
     send_commit(driver, device, { light_mode = baf.OFF_ON_AUTO.ON }, true)
   else
     send_commit(driver, device, { fan_mode = baf.OFF_ON_AUTO.ON }, true)
+    cascade_light(driver, device, true)
   end
 end
 
@@ -804,6 +882,7 @@ local function switch_off(driver, device, command)
     send_commit(driver, device, { light_mode = baf.OFF_ON_AUTO.OFF }, true)
   else
     send_commit(driver, device, { fan_mode = baf.OFF_ON_AUTO.OFF }, true)
+    cascade_light(driver, device, false)
   end
 end
 
@@ -832,6 +911,11 @@ local function set_mode(driver, device, command)
     return
   end
   send_commit(driver, device, { fan_mode = value }, true)
+  -- Fan+Light cascade (see cascade_light above): Off turns the light off
+  -- too; On or Auto turns it on — matching how the plain switch
+  -- capability already collapses fan_mode's 3 states into on/off
+  -- (fan_mode == 0 is the only "off" case there too).
+  cascade_light(driver, device, value ~= baf.OFF_ON_AUTO.OFF)
 end
 
 -- CORRECTED 2026-08-25: the "never takes effect" conclusion that removed
@@ -849,7 +933,7 @@ end
 --
 -- 2026-08-25: added a stop-the-fan-first interlock, since this original
 -- code committed reverse_enable directly regardless of whether the fan
--- was spinning -- the exact sequence that likely put that fan
+-- was spinning -- the exact sequence that likely put a fan
 -- into reverse at full speed in the first place, and was worked around
 -- manually (stop, verify stopped, then flip) via the standalone fix
 -- script when that incident was caught. That manual sequence is now
@@ -952,6 +1036,33 @@ end
 
 local function led_indicators_off(driver, device, command)
   send_more_commit(device, "led_indicators_enable", false)
+end
+
+--- showSettings turnOn/turnOff (2026-08-29): pure local state, no
+--- protocol commit at all -- unlike every other switch handler in this
+--- file, there's no real hardware behind this, just a stored value
+--- other Settings tiles' visibleCondition gate on (see device_init's
+--- seed call for why this is safe to default immediately, unlike
+--- sleepMode's genuinely-unknown-until-a-real-command state).
+local function show_settings_on(driver, device, command)
+  device:emit_component_event(device.profile.components.settings,
+    SHOW_SETTINGS_CAP.showSettings({ value = "On" }))
+end
+
+local function show_settings_off(driver, device, command)
+  device:emit_component_event(device.profile.components.settings,
+    SHOW_SETTINGS_CAP.showSettings({ value = "Off" }))
+end
+
+--- Presentation switched from "switch" to "list" (2026-08-29, user
+--- request: a plain tap-to-open dropdown instead of a toggle, matching
+--- fanMode/sleepMode elsewhere in this driver) -- setShowSettings is
+--- the command that presentation actually invokes now; turnOn/turnOff
+--- above are left wired but unused by the current presentation, same as
+--- ledIndicators/etc's own unused setXxx leftovers.
+local function set_show_settings(driver, device, command)
+  device:emit_component_event(device.profile.components.settings,
+    SHOW_SETTINGS_CAP.showSettings({ value = command.args.showSettings }))
 end
 
 local function fan_beep_on(driver, device, command)
@@ -1107,6 +1218,11 @@ local baf_driver = Driver("bigassfans-i6-lan", {
       [LED_INDICATORS_CAP.commands.setLedIndicators.NAME] = set_led_indicators,
       ["turnOn"] = led_indicators_on,
       ["turnOff"] = led_indicators_off,
+    },
+    [SHOW_SETTINGS_CAP.ID] = {
+      [SHOW_SETTINGS_CAP.commands.setShowSettings.NAME] = set_show_settings,
+      ["turnOn"] = show_settings_on,
+      ["turnOff"] = show_settings_off,
     },
     [FAN_BEEP_CAP.ID] = {
       [FAN_BEEP_CAP.commands.setFanBeep.NAME] = set_fan_beep,
