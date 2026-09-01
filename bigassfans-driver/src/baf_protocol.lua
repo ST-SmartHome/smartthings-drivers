@@ -86,16 +86,42 @@ baf.FIELDS = {
   light_brightness_percent = { no = 69, kind = "int",  category = "LIGHT", default = 0 },
 
   -- SENSORS — never swept before 2026-08-27. `temperature_raw` is scaled
-  -- ×100 (raw 3170 == 31.70°C) — confirmed via a separate independent
-  -- weather station reading, not just guessed: fan read 31.7°C, weather
-  -- station read 32.9°C at the same moment, accepted as close enough for
-  -- a different-but-nearby location.
+  -- ×100 (raw 3170 == 31.70°C) — confirmed via the household's own
+  -- weather station, colocated with a planned future device, not just
+  -- guessed: fan read 31.7°C, weather station read 32.9°C at the same
+  -- moment, accepted as close enough for a different-but-nearby location.
   -- `humidity` (field 87) deliberately NOT modeled here — it consistently
-  -- reads a suspiciously round 100000 on both fans, matching
-  -- `hasHumiditySensor: false` already confirmed via the capabilities
-  -- blob (field 17) -- this looks like a "not populated" sentinel, not a
-  -- real reading, and both fans agree, so it's not being treated as one.
+  -- reads a suspiciously round 100000 on both fans, looking like a "not
+  -- populated" sentinel rather than a real reading (both fans agree).
+  --
+  -- 2026-09-01 CORRECTION: this comment previously attributed that to a
+  -- "hasHumiditySensor: false" capability flag -- checked against the
+  -- upstream aiobafi6 proto verbatim and no such field exists. The real
+  -- `Capabilities` submessage (SENSORS category, field 17) only names 4
+  -- sub-fields: has_comfort1=1, has_comfort3=3, has_light=4, has_uplight=6.
+  -- Live-queried on a real fan: true sub-fields are {1,3,4,7,9,10,14}
+  -- -- has_comfort1/has_comfort3/has_light all true (comfort-related
+  -- capability flags being true is independent corroboration that the
+  -- still-unconfirmed Comfort-screen fields elsewhere in this table are
+  -- real, beyond just the original pcap correlation), has_uplight(6)
+  -- correctly absent/false (this household's fans have no uplight
+  -- module), and sub-fields 7/9/10/14 remain undocumented in the public
+  -- schema. Also corrects an earlier, separately-wrong claim that field 3
+  -- of this submessage was "hasOccupancySensor" -- the real occupancy
+  -- fields are plain top-level Properties fields instead:
+  -- `fan_occupancy_detected` (66, already modeled below) and
+  -- `light_occupancy_detected` (85, confirmed to exist in the upstream
+  -- schema but never queried/modeled here yet).
   temperature_raw = { no = 86, kind = "int", category = "SENSORS", default = 0 },
+
+  -- 2026-09-01 -- promoted from documentation-only to an actively-used
+  -- field: gates whether ensure_light_child creates a light-child device
+  -- at all, instead of doing so unconditionally for every fan. Raw bytes
+  -- (nested submessage, no encode path needed -- read-only). Use
+  -- baf.decode_light_capability below rather than reading sub-fields
+  -- directly -- keeps the "which sub-field numbers mean light" knowledge
+  -- in one place.
+  capabilities = { no = 17, kind = "bytes", category = "SENSORS" },
 
   -- MORE — confirmed 2026-08-26 via a real packet capture of the official
   -- app: these three are NEVER returned by a direct category query (all 7
@@ -148,11 +174,97 @@ baf.FIELDS = {
   sleep_timer_duration        = { no = 112, kind = "int",  category = "FAN",   default = 300 },  -- seconds
   sleep_return_to_auto        = { no = 129, kind = "bool", category = "FAN",   default = false },
   sleep_return_to_auto_secs   = { no = 130, kind = "int",  category = "FAN",   default = 7200 },
-  sleep_brightness_mode       = { no = 103, kind = "enum", category = "LIGHT", default = 2 },   -- Off/Dim/Auto
+  sleep_brightness_mode       = { no = 103, kind = "enum", category = "LIGHT", default = 2 },   -- Off/On/Auto
   sleep_brightness_percent    = { no = 104, kind = "int",  category = "LIGHT", default = 0 },   -- percent
   wake_up_mode                = { no = 107, kind = "enum", category = "LIGHT", default = 0 },   -- Off/Auto/On
   wake_up_brightness          = { no = 108, kind = "int",  category = "LIGHT", default = 0 },   -- percent
   wake_up_motion_timeout_secs = { no = 128, kind = "int",  category = "LIGHT", default = 600 },
+
+  -- ===== 2026-08-29 pcap discovery — Comfort/Motion screens, NOT YET
+  -- CONFIRMED. Decoded from raw commit values captured while navigating
+  -- the official app's Comfort and Motion screens, same methodology as
+  -- the original (later-corrected) Min/Max Speed guesses -- matched by
+  -- value shape/count and rough correspondence to the screenshots seen
+  -- the same session, NOT by a per-field isolated capture with narrated
+  -- actions. Treat every mapping below as a candidate to verify (a
+  -- fresh commit + the app's own displayed value, one field at a time)
+  -- before relying on it, same as every previously-confirmed field in
+  -- this table was. Defaults are the baseline values seen in the same
+  -- QueryResult chunk these fields co-occurred in.
+  comfort_enable      = { no = 47, kind = "bool", category = "FAN", default = true },  -- candidate: "Auto Comfort" master toggle
+  comfort_ideal_temp  = { no = 48, kind = "int",  category = "FAN", default = 2444 },  -- candidate: Comfort's own Ideal Temperature, x100 C (2444 ~= 24.44C, close to the 24.5C shown on-screen)
+  comfort_min_speed   = { no = 50, kind = "int",  category = "FAN", default = 0 },     -- candidate: "Min Speed" (native 0-7, paired with 51)
+  comfort_max_speed   = { no = 51, kind = "int",  category = "FAN", default = 7 },     -- candidate: "Max Speed" (paired with 50)
+  heat_assist_enable  = { no = 60, kind = "bool", category = "FAN", default = true },  -- candidate: "Heat Assist" toggle
+  -- CONFLICT, not just unconfirmed: field 52 was already assigned to
+  -- motion_sense_enable in an earlier session, confirmed via real
+  -- hardware (a fan genuinely auto-started from live detected motion at
+  -- fan_mode=AUTO) -- much stronger evidence than this single
+  -- uncorroborated pcap commit (field 52 alone, value 1, no co-occurring
+  -- fields in the same Commit to disambiguate). Do not trust this
+  -- "heat_assist_reverse" label -- resolve via an isolated capture
+  -- (toggle ONLY Heat Assist's Reverse switch, nothing under Motion)
+  -- before wiring anything to field 52 for either meaning.
+  heat_assist_reverse = { no = 52, kind = "bool", category = "FAN", default = false }, -- candidate: "Reverse" under Heat Assist -- only ever seen committed once (to true), baseline/off value not independently confirmed
+  -- field 42 is a nested 2-field submessage (bytes, e.g. \x08\x01\x10\x02
+  -- = {1: 1, 2: 2}), not a plain scalar -- candidate: "Unoccupied
+  -- Behavior" ("Smart Mix" etc, a compound setting). decode_field_value
+  -- passes an unrecognized kind through as raw bytes safely (falls into
+  -- its int/enum branch), so this is safe to leave as "bytes" for
+  -- reading, but build_commit has NO encode path for it -- do not wire
+  -- any write handler to this field until build_commit gains real
+  -- nested-message support, or it will encode garbage.
+  unoccupied_behavior = { no = 42, kind = "bytes", category = "FAN" },
+  -- 2026-09-01: ruled OUT as plain FAN-category queryable fields. Live
+  -- test against a real fan -- baseline query, then 5
+  -- separate real on-screen changes in sequence (Auto Comfort off,
+  -- Ideal Temp 22.5C, Min Speed 3, Max Speed 6, Heat Assist on, Heat
+  -- Assist Speed 5), re-querying FAN after each -- every single one of
+  -- 42/47/48/50/51/52/54/55/60 stayed absent throughout, even though the
+  -- app visibly showed each new value. Same shape of finding as
+  -- sleepMode/ledIndicators/fanBeep/legacyIrRemote before they were
+  -- solved: real values a plain query can never see because they only
+  -- ever push unsolicited on the SAME connection as the commit that set
+  -- them. Confirmation for this whole cluster needs an actual passive
+  -- capture of the app's own connection (or the same
+  -- query-then-commit-then-read-burst trick already used for the
+  -- MORE_PUSH fields, if these turn out to share that mechanism) -- a
+  -- live query from a separate connection, however well-timed, will not
+  -- work, proven empirically here.
+  -- Two more fields seen changing in the same Motion/Unoccupied cluster,
+  -- meaning genuinely unclear yet -- lower confidence than the above.
+  motion_field_54 = { no = 54, kind = "bool", category = "FAN", default = false },
+  motion_field_55 = { no = 55, kind = "int",  category = "FAN", default = 900 },  -- seconds (900 = 15min baseline)
+
+  -- 2026-09-01 -- full category sweep (ALL/FAN/LIGHT/
+  -- FIRMWARE_MORE_DATETIME_API/NETWORK/SCHEDULES/SENSORS all queried,
+  -- every field number found recorded), not from a pcap this time --
+  -- direct live queries against a real fan. All NOT YET CONFIRMED --
+  -- no isolated-change testing done, just noting what a snapshot returns.
+  -- fan_target_rpm(63) is notable: identical value to current_rpm(64) in
+  -- the same query, worth checking whether it tracks a commanded setpoint
+  -- distinct from the read-only actual RPM.
+  fan_target_rpm      = { no = 63, kind = "int",    category = "FAN" },
+  -- wifi_module_version(16, ALL category) is a nested 2-field submessage
+  -- (sub-field 1 = a small int, sub-field 2 = a version string like
+  -- "5.8.1") -- distinct from the main fan firmware_version(7, "3.3.7").
+  -- No encode path exists for nested messages here (same caveat as
+  -- unoccupied_behavior above) -- read-only candidate, bytes kind.
+  wifi_module_version = { no = 16, kind = "bytes",  category = "ALL" },
+  all_field_15         = { no = 15, kind = "int",    category = "ALL" },
+  all_field_153        = { no = 153, kind = "int",   category = "ALL" },
+  -- NETWORK category -- never queried by this driver before this sweep.
+  network_ip           = { no = 120, kind = "string", category = "NETWORK" },
+  network_field_121     = { no = 121, kind = "int",    category = "NETWORK" },
+  -- network_wifi_info(124): nested submessage, sub-field 1 = the
+  -- connected Wi-Fi SSID name in PLAINTEXT -- confirms the fan exposes
+  -- its network's SSID to anyone on the LAN who queries it, unauthenticated,
+  -- a real (minor) protocol-level privacy fact worth knowing regardless of
+  -- whether this ever becomes a capability. A second sub-field looking
+  -- like a signal-strength/RSSI reading appeared in one query but not an
+  -- immediately following one -- possibly a live-changing value, possibly
+  -- a parsing artifact; not confirmed either way.
+  network_wifi_info    = { no = 124, kind = "bytes", category = "NETWORK" },
 }
 
 local FIELD_BY_NO = {}
@@ -290,6 +402,30 @@ function baf.parse_category_result(payload, category)
     result[name] = value
   end
   return result
+end
+
+--- Decodes the raw bytes of the `capabilities` field (SENSORS category,
+--- field 17) and answers "does this fan have a real light to control" --
+--- true if either has_light (sub-field 4) or has_uplight (sub-field 6)
+--- is present and true, matching the upstream schema's own guidance
+--- ("integrations should check has_uplight in addition to has_light").
+--- Sub-field ABSENCE means false, same "missing means default" convention
+--- as everything else in this protocol. Returns false (not nil) on any
+--- decode failure -- a malformed/unexpected blob should read as "no light
+--- reported", never crash the caller (ensure_light_child's fail-open
+--- fallback is for a failed *query*, not a failed *decode* of one that
+--- succeeded).
+function baf.decode_light_capability(raw_bytes)
+  if type(raw_bytes) ~= "string" then
+    return false
+  end
+  local ok, sub_fields = pcall(pb.parse_fields, raw_bytes)
+  if not ok then
+    return false
+  end
+  local has_light = pb.last(sub_fields, 4)
+  local has_uplight = pb.last(sub_fields, 6)
+  return (has_light ~= nil and has_light ~= 0) or (has_uplight ~= nil and has_uplight ~= 0)
 end
 
 return baf
