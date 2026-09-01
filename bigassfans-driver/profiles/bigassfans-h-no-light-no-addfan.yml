@@ -12,63 +12,63 @@ components:
         version: 1
       - id: refresh
         version: 1
-      - id: aboutisland47519.fanMode
+      - id: examplens.fanMode
         version: 1
-      - id: aboutisland47519.fanDirection
+      - id: examplens.fanDirection
         version: 1
-      - id: aboutisland47519.whoosh
+      - id: examplens.whoosh
         version: 1
-      - id: aboutisland47519.ecoMode
+      - id: examplens.ecoMode
         version: 1
     categories:
       - name: Fan
   - id: settings
     label: "Settings"
     capabilities:
-      - id: aboutisland47519.ledIndicators
+      - id: examplens.ledIndicators
         version: 1
-      - id: aboutisland47519.fanBeep
+      - id: examplens.fanBeep
         version: 1
-      - id: aboutisland47519.legacyIrRemote
+      - id: examplens.legacyIrRemote
         version: 1
       - id: temperatureMeasurement
         version: 1
   - id: sleep
     label: "Sleep"
     capabilities:
-      - id: aboutisland47519.sleepMode
+      - id: examplens.sleepMode
         version: 1
-      - id: aboutisland47519.wakeUpMotionTimeout
+      - id: examplens.wakeUpMotionTimeout
         version: 1
-      - id: aboutisland47519.sleepAutoMode
+      - id: examplens.sleepAutoMode
         version: 1
-      - id: aboutisland47519.sleepAutoModeGate
+      - id: examplens.sleepAutoModeGate
         version: 1
-      - id: aboutisland47519.sleepSpeed
+      - id: examplens.sleepSpeed
         version: 1
-      - id: aboutisland47519.sleepIdealTemperature
+      - id: examplens.sleepIdealTemperature
         version: 1
-      - id: aboutisland47519.sleepTimer
+      - id: examplens.sleepTimer
         version: 1
-      - id: aboutisland47519.sleepTimerEndSpeed
+      - id: examplens.sleepTimerEndSpeed
         version: 1
-      - id: aboutisland47519.sleepTimerDuration
+      - id: examplens.sleepTimerDuration
         version: 1
-      - id: aboutisland47519.sleepReturnToAuto
+      - id: examplens.sleepReturnToAuto
         version: 1
-      - id: aboutisland47519.sleepReturnToAutoDuration
+      - id: examplens.sleepReturnToAutoDuration
         version: 1
-      - id: aboutisland47519.sleepBrightnessMode
+      - id: examplens.sleepBrightnessMode
         version: 1
-      - id: aboutisland47519.sleepBrightnessModeGate
+      - id: examplens.sleepBrightnessModeGate
         version: 1
-      - id: aboutisland47519.sleepBrightnessPercent
+      - id: examplens.sleepBrightnessPercent
         version: 1
-      - id: aboutisland47519.wakeUpMode
+      - id: examplens.wakeUpMode
         version: 1
-      - id: aboutisland47519.wakeUpModeGate
+      - id: examplens.wakeUpModeGate
         version: 1
-      - id: aboutisland47519.wakeUpBrightness
+      - id: examplens.wakeUpBrightness
         version: 1
 preferences:
   - title: "Manual IP Override"

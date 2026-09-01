@@ -27,7 +27,7 @@ exposes it as a second `grid` component:
   this unless there's solar surplus" style condition — don't use the
   inverter's own production figure for that, it doesn't account for what
   the house itself is drawing.
-- **`aboutisland47519.gridEnergy`** (custom capability) — lifetime
+- **`examplens.gridEnergy`** (custom capability) — lifetime
   exported/imported energy.
 
 No meter present is a normal, fully-supported case — the driver detects
@@ -74,17 +74,17 @@ unit ID (typically `1`), and poll interval (30s by default).
 | `main` | `powerMeter` | Live inverter output power (W) |
 | `main` | `energyMeter` | Lifetime energy produced (kWh) |
 | `main` | `temperatureMeasurement` | Inverter temperature (°C) |
-| `main` | `aboutisland47519.inverterStatus` | Operating status (MPPT/THROTTLED/FAULT/etc — see below) |
+| `main` | `examplens.inverterStatus` | Operating status (MPPT/THROTTLED/FAULT/etc — see below) |
 | `main` | `refresh` | Manual refresh button |
 | `grid` (optional hardware) | `powerMeter` | Net grid power, signed — see "Grid import/export meter" above |
-| `grid` (optional hardware) | `aboutisland47519.gridEnergy` | Lifetime exported/imported energy (kWh) |
+| `grid` (optional hardware) | `examplens.gridEnergy` | Lifetime exported/imported energy (kWh) |
 | `dc` | `voltageMeasurement` | DC voltage straight off the solar panels, before inversion |
 | `dc` | `powerMeter` | DC power straight off the solar panels, before inversion |
 
 ## Inverter operating status
 
 `I_Status` (OFF/SLEEPING/STARTING/MPPT/THROTTLED/SHUTTING_DOWN/FAULT/
-STANDBY) is exposed as a custom capability, `aboutisland47519.
+STANDBY) is exposed as a custom capability, `examplens.
 inverterStatus` — no standard SmartThings capability fits inverter
 operating state, so it's a free-text status attribute visible in the app,
 not just in logs.
