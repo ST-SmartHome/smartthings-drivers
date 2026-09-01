@@ -18,13 +18,6 @@ scan and confirmed fully working: every capability (fan switch/speed/mode/
 direction/whoosh/eco, light switch/brightness) reads and writes correctly
 against the real devices.
 
-4 profile variants exist, auto-selected per-device from preferences; the
-2 variants where the light is a genuine child device (rather than an
-inline component, briefly the case only in the first seconds after a
-fan's discovery) both carry the full feature set below — Sleep-section
-gating, the Fan+Light combined switch, the collapsible Settings toggle,
-and the labeled fan-speed slider.
-
 ## Protocol details (confirmed empirically against two real fans, not from docs alone)
 
 - **Transport**: plain TCP to port 31415, one connection per request.
