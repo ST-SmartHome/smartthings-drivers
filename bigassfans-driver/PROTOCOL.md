@@ -60,8 +60,43 @@ enum) and 18 (`light_auto_motion_timeout` in seconds) when the light
 action is Auto. These live inside a completely different nested message
 from the `Properties` table above — the field numbers coincidentally
 overlapping with unrelated `Properties` fields is not a conflict, just
-two independent numbering spaces. The schedule **write** path (creating/
-editing a schedule entry) remains completely unknown.
+two independent numbering spaces.
+
+**The schedule write path is now decoded too**, confirmed via a real
+pcap of the app creating, editing, and deleting schedule entries (an
+earlier claim that this goes through BAF's cloud API instead was too
+broad — based on one screen that happened not to show a local commit,
+not the whole write surface). `Commit` (the same message every other
+write in this driver already uses) has a **field 4**, never modeled by
+this driver or any reference project before:
+`{1: <slot index, varint>, 2: <Schedule message, or empty for a
+delete>}`. Three real captured examples:
+
+- Re-saving an existing light-type schedule unchanged: `4: {1: 1, 2: {2:
+  "My Schedule", 4: [1,2,3,4,5,6,7], 5: 1, 6: 1, 7: {1: "17:00",
+  2: {5: 2}, 2: {18: 10800}}}}` — content matching the read-side decode
+  exactly (day list, name, time, light action).
+- Creating a new Bedtime/Wake-Up-type schedule (no name, no light
+  action): `4: {1: 1, 2: {1: 1, 4: [2,3,4,5,6,7,1], 5: 2, 6: 1,
+  7: {1: "23:00"}, 8: {1: "06:00"}}}` — a genuinely different shape from
+  the light schedule's, confirming `Schedule`'s content depends on its
+  type. None of the fan's live Sleep sub-settings (configured in the same
+  app flow, via the normal `Commit{3: properties}` path — see the FIELDS
+  table above) appear in this payload at all; the best-supported reading
+  is that a Bedtime/Wake-Up schedule just triggers Sleep Mode on/off at
+  the given times using whatever the fan's live Sleep configuration
+  already is, rather than carrying its own snapshot.
+- Deleting that schedule: `4: {1: 2, 2: {1: 1}}` — note slot index 2
+  here, not the 1 both saves used; slot-index semantics aren't resolved
+  from this one capture.
+
+**Not yet built as a real feature** — the slot-index semantics and the
+exact meaning of `Schedule` fields 1/5/6 (which varied between the two
+captured shapes) need at least one more isolated test each, and
+`build_commit` has no encode support for a nested field-4 message yet
+(it only ever builds flat `{field_no = value}` property tables) — real
+new encode machinery is needed, not just a `FIELDS` entry, before this
+can actually be written from the driver.
 
 ## `Capabilities` submessage (field 17, SENSORS category)
 
