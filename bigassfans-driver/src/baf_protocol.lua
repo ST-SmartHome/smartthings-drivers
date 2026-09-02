@@ -492,16 +492,46 @@ end
 --    a bare `{1: 1}`), consistent with a delete needing little more than
 --    a slot reference.
 --
--- **Not yet built as a real feature.** This is a decode/discovery
--- finding, same stage every other feature in this file started at before
--- being wired into a capability + command handler + profile placement +
--- live 3-way verification (see project-status memory for that whole
--- process, repeated for every prior feature). Before building: the slot-
--- index semantics (why slot 2 for the delete, not 1) and the exact
--- meaning of Schedule fields 1/5/6 (varying between the two captured
--- shapes) need at least one more isolated test each, and build_commit
--- has no encode support for a nested field-4 message at all yet (it only
--- ever builds flat `{field_no = value}` property tables) -- would need
--- real new encode machinery, not just a new FIELDS entry.
+-- **2026-09-02, confirmed live against the real fan via a standalone
+-- Python harness (not this driver) — CRITICAL correction: this fan has
+-- only ONE schedule slot, not a list.** A generic protobuf encoder was
+-- built and verified byte-for-byte against the captured re-save frame
+-- above (exact match) before touching real hardware. Test sequence: (1)
+-- re-saved "My Schedule" unchanged — round-tripped byte-identical,
+-- confirmed safe; (2) created a second, differently-named test schedule
+-- ("ZZZ_TEST_DELETE_ME") expecting it to add alongside "My Schedule" --
+-- **a follow-up query showed only the new schedule; "My Schedule" was
+-- gone, not just hidden.** Confirmed with a multi-frame read (not a
+-- pagination/single-frame-read artifact) that the fan holds exactly one
+-- schedule at a time. **Immediately restored "My Schedule" using the
+-- byte-verified re-save from finding (1) and confirmed it was fully
+-- recovered** (same slot 3, all fields identical) — no lasting harm, but
+-- a genuine near-miss. The captured pcap's own "create a new schedule
+-- then delete it" sequence (slot 1 written, slot 2 deleted) makes much
+-- more sense read this way too: it was never "create alongside, pick a
+-- slot" — every write just overwrites whatever's there, and the fan's
+-- own internal slot bookkeeping (1 vs 2 vs 3 seen across different
+-- writes/reads) is not something a caller controls or should try to
+-- predict; **the field-1 slot value in a write request looks like it
+-- may not be meaningfully checked by the fan at all** (both saves in the
+-- pcap used 1; this session's restore also used 1 and landed correctly
+-- at whatever the real internal slot already was).
+--
+-- **Practical implication for any future feature**: this is not "add a
+-- schedule," it's "replace the fan's one on-device schedule." A real
+-- capability/handler needs to be built with that framing from the start
+-- (e.g. an explicit single "Timer" binding, not a list), and any write
+-- path must default to preserving the existing schedule's content
+-- (read-modify-write) rather than ever constructing one from scratch,
+-- to avoid silently destroying a real schedule a user already has
+-- configured through the official app.
+--
+-- **Not yet built as a real feature.** `build_commit` still has no
+-- encode support for a nested field-4 message at all (it only ever
+-- builds flat `{field_no = value}` property tables) — the standalone
+-- harness above proves the wire format works, but real new encode
+-- machinery is still needed in the driver itself, plus a capability +
+-- command handler + profile placement + live 3-way verification, same
+-- as every other feature in this file.
 
 return baf
