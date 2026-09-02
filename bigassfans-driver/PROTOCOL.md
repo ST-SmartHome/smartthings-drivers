@@ -89,34 +89,54 @@ delete>}`. Three real captured examples:
 - Deleting that schedule: `4: {1: 2, 2: {1: 1}}` — note slot index 2
   here, not the 1 both saves used.
 
-**CRITICAL correction, confirmed live against real hardware via a
-standalone harness**: this fan has **exactly one schedule slot, not a
-list**. A generic protobuf encoder was built and verified byte-for-byte
-against the captured re-save frame above before touching real hardware,
-then tested: re-saving "My Schedule" unchanged round-tripped
-byte-identical (safe) — but creating a *second*, differently-named
-schedule **replaced** "My Schedule" outright rather than adding
-alongside it (confirmed via a proper multi-frame read, not a
-single-frame artifact). Immediately restored "My Schedule" from the
-byte-verified re-save and confirmed full recovery — no lasting harm, but
-a real near-miss. This also explains the slot-index mystery above: the
-field-1 value in a write request doesn't appear to be meaningfully
-checked by the fan at all (every write in both the original pcap and
-this follow-up test used `1` and landed correctly regardless of the
-schedule's actual internal slot, which the fan manages on its own).
+**A "single schedule slot" theory was tested and disproven the same
+session — the fan supports multiple coexisting schedules.** A generic
+protobuf encoder was built and verified byte-for-byte against the
+captured re-save frame above before touching real hardware. Re-saving
+"My Schedule" unchanged round-tripped byte-identical (safe); creating a
+*second*, differently-named schedule then *appeared* to have replaced
+"My Schedule" outright — a follow-up query seemed to return only the new
+one. **Root cause, found once a second schedule created independently
+through the official app also showed up fine in the app's own list: the
+fan sends one SLIP frame per schedule in response to a single SCHEDULES
+query, and the test script's read function only consumed the first frame
+before closing the connection.** Reading properly (looping to an idle
+timeout instead of stopping after one frame) immediately showed both
+schedules present and fully intact — no data was actually lost. Real
+near-miss from trusting an under-tested harness against live hardware,
+but resolved with no lasting effect. The slot-index question from the
+delete example above is still open — not explained by the one-slot
+theory, which was wrong.
 
-**Practical implication**: this is not "add a schedule," it's "replace
-the fan's one on-device schedule." Any real capability must default to
-read-modify-write (fetch the existing schedule, change only what's
-needed, write it back) and never construct one from scratch, to avoid
-silently destroying whatever a user already has configured through the
-official app.
+**A third, richer `Schedule` shape** was found from the user's own real
+schedule (a start/end time range with per-boundary fan+light actions):
+`{1: 1, 2: "Test schedule", 4: [1..7], 5: 1, 6: 1,
+7: {1: "22:00", 2: {1: 1}, 2: {4: 4}, 2: {5: 1}, 2: {6: 64}},
+8: {1: "08:00", 2: {1: 2}, 2: {11: 1}, 2: {12: 2300}, 2: {13: 4},
+2: {14: 3}, 2: {15: 1}}}` — raw decode only, matched loosely against the
+app's own screen (Start 22:00: Speed 4, Light 64%; End 08:00: Fan Auto,
+no light action) but not independently isolated-tested, treat as a lead
+for a future capture, not documented behavior. Real decode gotcha hit
+here: a short ASCII time string ("08:00") can coincidentally parse as a
+syntactically-valid nested tag+varint sequence — always sanity-check a
+`bytes` field as a plain string first before trusting a recursive
+protobuf re-decode of it.
+
+**Practical implication, still true even though the one-slot theory was
+wrong**: a write should still default to read-modify-write (fetch
+existing schedules, change only what's needed) rather than constructing
+one from scratch, since exact multi-schedule capacity/collision rules
+are still unconfirmed. **Design note**: the eventual feature's schedule
+section should be its own collapsible menu (the same phantom-switch
+pattern this driver already uses for its Device Settings section), not
+folded into an existing component.
 
 **Not yet built as a real feature** — `build_commit` still has no encode
 support for a nested field-4 message at all (the standalone harness
-proves the wire format works, but real new encode machinery is still
-needed in the driver itself), plus a capability, command handler, and
-live 3-way verification, same as every other feature in this driver.
+proves the wire format works for the two fully-decoded shapes, but real
+new encode machinery is still needed in the driver itself), plus a
+capability, command handler, and live 3-way verification, same as every
+other feature in this driver.
 
 ## `Capabilities` submessage (field 17, SENSORS category)
 
