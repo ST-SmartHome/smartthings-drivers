@@ -283,6 +283,14 @@ local NO_LIGHT_PROFILE = "skyfan-dc-no-light.v2"
 local NO_ADDFAN_PROFILE = "skyfan-dc-no-addfan.v1"
 local NO_LIGHT_NO_ADDFAN_PROFILE = "skyfan-dc-no-light-no-addfan.v2"
 
+-- 2026-09-02: persisted once ensure_light_child's live DP probe (see below)
+-- positively confirms a fan has no light hardware, so profile_for treats
+-- it as no_light on every subsequent device_init too -- there's no
+-- preference-write path to set `noLight` itself (see
+-- smartthings-edge-driver-gotchas memory), so this field is the only way
+-- an automatic detection can actually stick.
+local PROBED_NO_LIGHT_FIELD = "probed_no_light"
+
 --- Which profile a device should be on right now, given its currently-saved
 --- noLight/hideAddFan preferences. Defaults to the original with-light,
 --- with-add-fan-button profile — the same default this driver has always
@@ -291,13 +299,16 @@ local NO_LIGHT_NO_ADDFAN_PROFILE = "skyfan-dc-no-light-no-addfan.v2"
 --- (observed live state) — once a light-child device is confirmed to
 --- actually exist, this device is treated as noLight regardless of that
 --- preference's raw value, since its light is now controlled through the
---- child instead. Deliberately does NOT write the noLight preference
---- itself (no preference-write path exists — see
---- smartthings-edge-driver-gotchas memory); this only affects which
---- profile ensure_correct_profile picks.
+--- child instead. Also treated as no_light if a live DP probe (see
+--- ensure_light_child below) has already positively confirmed the fan has
+--- no light hardware, persisted via PROBED_NO_LIGHT_FIELD since there's no
+--- way to actually write the noLight preference itself. Deliberately does
+--- NOT write the noLight preference itself (no preference-write path
+--- exists — see smartthings-edge-driver-gotchas memory); this only
+--- affects which profile ensure_correct_profile picks.
 local function profile_for(device, has_light_child)
   local prefs = device.preferences or {}
-  local no_light = prefs.noLight or has_light_child
+  local no_light = prefs.noLight or has_light_child or device:get_field(PROBED_NO_LIGHT_FIELD) == true
   if no_light and prefs.hideAddFan then
     return NO_LIGHT_NO_ADDFAN_PROFILE
   elseif no_light then
@@ -414,18 +425,48 @@ local function ensure_correct_profile(driver, device)
   device:set_field(ACTIVE_PROFILE_FIELD, target, { persist = true })
 end
 
+-- 2026-09-02: live capability probe, so a genuinely no-light fan gets
+-- detected automatically instead of requiring the user to know to set the
+-- "No Physical Light" preference before first pairing. Confirmed
+-- empirically against real hardware: a no-light fan's local status query
+-- omits DP 15 (light switch) entirely -- not just reporting it false --
+-- while a light-having fan's response includes "15":false explicitly when
+-- the light happens to be off, ruling out "missing means default" as an
+-- alternative explanation (that convention doesn't apply to this driver's
+-- Tuya protocol the way it does to bigassfans-driver's i6 one). Fails
+-- open (assumes light present) on anything other than a clean, successful
+-- query that positively omits DP 15 -- an unconfigured device, a timeout,
+-- or any other query failure must never skip creating a real fan's light
+-- child.
+local function probe_has_light(device)
+  local s = get_settings(device)
+  if not s.ip or not s.local_key or not s.device_id then
+    return true
+  end
+  local dps, err = TuyaClient.query_status(s.ip, s.local_key, s.device_id, 5)
+  if not dps then
+    log.warn("Skyfan DC light-capability probe failed for " .. device.id ..
+      ", assuming light present: " .. tostring(err))
+    return true
+  end
+  return dps["15"] ~= nil
+end
+
 --- Creates a light-child device for this fan — automatic for every fan
 --- with a physical light (confirmed working end-to-end via a real pilot
 --- fan, see skyfan-driver-project-status memory), skipped
---- for a noLight device (nothing to split off) or if called on a child
---- itself. Idempotent via find_light_child (observed state), so safe to
---- call on every init. Deliberately does NOT also switch this device's
+--- for a noLight device (nothing to split off), a device the live probe
+--- above has already confirmed has no light hardware, or if called on a
+--- child itself. Idempotent via find_light_child (observed state) and
+--- PROBED_NO_LIGHT_FIELD (probe result), so safe to call on every init —
+--- a fan already known one way or the other short-circuits before the
+--- probe ever runs again. Deliberately does NOT also switch this device's
 --- own profile in the same pass — ensure_correct_profile picks up
---- has_light_child on whichever LATER init actually observes the child
---- existing (naturally true here already, since try_create_device is
---- fire-and-forget and the platform won't have created it synchronously
---- within this same call) — create-then-confirm-then-switch stays two
---- effectively-separate steps even though the code is textually
+--- has_light_child / PROBED_NO_LIGHT_FIELD on whichever LATER init
+--- actually observes them (naturally true here already, since both
+--- try_create_device and this probe's own persisted field only take
+--- effect after this call returns) — create-then-confirm-then-switch
+--- stays two effectively-separate steps even though the code is textually
 --- adjacent, so a failed/delayed creation can never leave the light
 --- orphaned mid-migration.
 local function ensure_light_child(driver, device)
@@ -435,7 +476,16 @@ local function ensure_light_child(driver, device)
   if device.preferences and device.preferences.noLight then
     return
   end
+  if device:get_field(PROBED_NO_LIGHT_FIELD) == true then
+    return
+  end
   if find_light_child(driver, device) then
+    return
+  end
+  if not probe_has_light(device) then
+    log.info("Skyfan DC live probe found no light hardware for " .. device.id ..
+      ", skipping light-child creation")
+    device:set_field(PROBED_NO_LIGHT_FIELD, true, { persist = true })
     return
   end
   local label = (device.label or device.id) .. " Light"
