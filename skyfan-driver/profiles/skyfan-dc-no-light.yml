@@ -1,4 +1,7 @@
-name: skyfan-dc-no-light.v1
+name: skyfan-dc-no-light.v2
+metadata:
+  mnmn: SmartThingsCommunity
+  vid: a1b2c3d4-0000-3000-8000-000000000003
 components:
   - id: main
     label: "Fan"
