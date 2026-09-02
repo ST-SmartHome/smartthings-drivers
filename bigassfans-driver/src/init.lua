@@ -75,6 +75,22 @@ local WAKE_UP_MODE_GATE_CAP = capabilities["examplens.wakeUpModeGate"]
 -- can gate on a single EQUALS "On" against THIS instead.
 local WAKE_UP_BRIGHTNESS_GATE_CAP = capabilities["examplens.wakeUpBrightnessGate"]
 local WAKE_UP_BRIGHTNESS_CAP = capabilities["examplens.wakeUpBrightness"]
+
+-- Schedule (2026-09-02): binds SmartThings to the fan's own on-device
+-- schedule, decoded via baf.build_schedule_commit/parse_schedule_frame/
+-- set_schedule_enabled (see baf_protocol.lua's "Schedule write path"
+-- comment for the full protocol writeup and the near-miss that shaped
+-- this design). Deliberately scoped to ONE schedule, chosen by exact
+-- name match against the scheduleName preference -- never constructs a
+-- schedule from scratch, always reads the real one first and patches
+-- only the one field being changed (read-modify-write), since the exact
+-- rules for how many schedules a fan will hold and what a write
+-- collision does are still not fully understood. showSchedule is the
+-- same phantom-switch pattern as showSettings (pure local UI state, no
+-- protocol commit) -- its own section, per explicit user design
+-- direction, not folded into an existing component.
+local SHOW_SCHEDULE_CAP = capabilities["examplens.showSchedule"]
+local SCHEDULE_ENABLED_CAP = capabilities["examplens.scheduleEnabled"]
 local WAKE_UP_MOTION_TIMEOUT_CAP = capabilities["examplens.wakeUpMotionTimeout"]
 
 local OFF_ON_AUTO_TO_STRING = { [0] = "Off", [1] = "On", [2] = "Auto" }
@@ -302,6 +318,49 @@ local function apply_sleep_status(device, fan, light)
   end
 end
 
+--- Queries schedules and emits scheduleEnabled for whichever one matches
+--- the scheduleName preference by exact name. Deliberately its OWN
+--- connection (BafClient.query_schedules), not folded into the regular
+--- FAN/LIGHT/SENSORS poll_once cycle -- schedule content changes rarely
+--- (only via this capability or the official app), so paying for an
+--- extra TCP connection every single poll cycle isn't worth it on this
+--- fan's known-lossy Wi-Fi; called instead from device_init, the
+--- refresh command, and right after this driver's own writes. Silently
+--- leaves the attribute at whatever it last was if the query fails or no
+--- schedule matches the configured name (logged, not surfaced as an
+--- error state) -- an unfound schedule is a configuration mismatch to
+--- notice via the log, not something to guess an answer for.
+local function apply_schedule_status(driver, device)
+  local schedule_component = device.profile.components.schedule
+  if not schedule_component then
+    return
+  end
+  local ip = resolve_ip(device)
+  if not ip then
+    return
+  end
+  local name = device.preferences and device.preferences.scheduleName
+  if not name or name == "" then
+    return
+  end
+  local schedules, err = BafClient.query_schedules(ip, 5)
+  if not schedules then
+    log.warn("BAF schedule status query failed: " .. tostring(err))
+    return
+  end
+  local sched = baf.find_schedule_by_name(schedules, name)
+  if not sched then
+    log.warn("BAF no schedule named '" .. name .. "' found (" .. #schedules .. " schedule(s) present)")
+    return
+  end
+  local enabled = baf.schedule_enabled(sched)
+  if enabled == nil then
+    return
+  end
+  device:emit_component_event(schedule_component,
+    SCHEDULE_ENABLED_CAP.scheduleEnabled({ value = enabled and "On" or "Off" }))
+end
+
 --- Handles three cases uniformly: (1) a light-child device — emits
 --- directly on its own (only) "main" component; (2) a not-yet-split
 --- device that still has a `light` component in its active profile —
@@ -356,8 +415,8 @@ local function poll_once(driver, device)
     -- same connection, no extra TCP overhead.
     --
     -- One immediate retry on failure: found 2026-08-22 that on a
-    -- sufficiently lossy Wi-Fi network (real households have seen ~40%
-    -- TX retry rates on the fan's own Wi-Fi, unrelated to this driver)
+    -- sufficiently lossy Wi-Fi network (this household's "Sengled" SSID
+    -- runs ~40% TX retry rates on both fans, unrelated to this driver)
     -- poll_once fails with "read failed waiting for start delimiter:
     -- timeout" on roughly 1-in-5 cycles per fan — a lost/delayed response,
     -- not a slow one, so a longer timeout wouldn't help; a fresh attempt
@@ -665,7 +724,7 @@ end
 local WITH_ADDFAN_PROFILE = "bigassfans-h.v8"
 local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v8"
 local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v9"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v27"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v28"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
 -- All four reset to nil after the 2026-08-27 v2->v3 bump above (a new
@@ -732,11 +791,11 @@ local function ensure_correct_profile(driver, device)
 end
 
 --- Automatic for every fan with a physical light — no per-device opt-in
---- anymore. Piloted behind a splitLightDevice preference on one fan first
---- (2026-08-25: created, confirmed mirroring state both directions and
---- controlling the real light, confirmed as its own separate Alexa
---- device) before making it unconditional here for every other fan too,
---- including ones added in the future. Still skipped for
+--- anymore. Piloted behind a splitLightDevice preference on one fan
+--- first (2026-08-25: created, confirmed mirroring state both
+--- directions and controlling the real light, confirmed as its own
+--- separate Alexa device) before making it unconditional here for every
+--- other fan too, including ones added in the future. Still skipped for
 --- a noLight device — nothing to split off if there's no physical light
 --- kit. Idempotent via find_light_child (observed state), so safe to
 --- call on every init. Deliberately does NOT also switch this device's
@@ -831,6 +890,21 @@ local function device_init(driver, device)
       device:get_latest_state("settings", "examplens.showSettings", "showSettings") == nil then
     device:emit_component_event(settings_component,
       SHOW_SETTINGS_CAP.showSettings({ value = "On" }))
+  end
+  -- Same seed pattern as showSettings above -- pure local UI state, safe
+  -- to default immediately.
+  local schedule_component = device.profile.components.schedule
+  if schedule_component and
+      device:get_latest_state("schedule", "examplens.showSchedule", "showSchedule") == nil then
+    device:emit_component_event(schedule_component,
+      SHOW_SCHEDULE_CAP.showSchedule({ value = "Show" }))
+  end
+  -- Real, network-dependent status -- wrapped in pcall like poll_once,
+  -- for the same reason: an uncaught error here must never stop
+  -- start_polling below from ever running.
+  local ok, err = pcall(apply_schedule_status, driver, device)
+  if not ok then
+    log.error("BAF apply_schedule_status crashed during device_init: " .. tostring(err))
   end
   start_polling(driver, device)
 end
@@ -1081,6 +1155,65 @@ local function set_show_settings(driver, device, command)
     SHOW_SETTINGS_CAP.showSettings({ value = command.args.showSettings }))
 end
 
+--- showSchedule: same phantom-switch pattern as showSettings above --
+--- pure local UI state, no protocol commit, safe to default immediately
+--- (see device_init's seed call).
+local function show_schedule_on(driver, device, command)
+  device:emit_component_event(device.profile.components.schedule,
+    SHOW_SCHEDULE_CAP.showSchedule({ value = "Show" }))
+end
+
+local function show_schedule_off(driver, device, command)
+  device:emit_component_event(device.profile.components.schedule,
+    SHOW_SCHEDULE_CAP.showSchedule({ value = "Hide" }))
+end
+
+--- Real read-modify-write: queries the current schedules, finds the one
+--- matching scheduleName exactly, patches ONLY the enable flag via
+--- baf.set_schedule_enabled (never reconstructs a schedule from
+--- scratch), writes it back, and verifies via BafClient.
+--- commit_schedule_and_verify. Every failure mode (no IP yet, query
+--- failed, schedule not found, patch refused, write not verified) is
+--- logged and returns without emitting a new (possibly wrong) status --
+--- apply_schedule_status will pick up whatever the fan's real state
+--- actually is on the next refresh/init rather than this handler ever
+--- guessing.
+local function set_schedule_enabled(driver, device, command)
+  local ip = resolve_ip(device)
+  if not ip then
+    log.warn("BAF setScheduleEnabled attempted before device is fully configured")
+    return
+  end
+  local name = device.preferences and device.preferences.scheduleName
+  if not name or name == "" then
+    log.warn("BAF setScheduleEnabled: no scheduleName preference configured")
+    return
+  end
+  local schedules, query_err = BafClient.query_schedules(ip, 5)
+  if not schedules then
+    log.error("BAF setScheduleEnabled: schedule query failed: " .. tostring(query_err))
+    return
+  end
+  local sched = baf.find_schedule_by_name(schedules, name)
+  if not sched then
+    log.error("BAF setScheduleEnabled: no schedule named '" .. name .. "' found")
+    return
+  end
+  local want_enabled = command.args.value == "On"
+  local new_raw, patch_err = baf.set_schedule_enabled(sched.raw, want_enabled)
+  if not new_raw then
+    log.error("BAF setScheduleEnabled: patch refused: " .. tostring(patch_err))
+    return
+  end
+  local ok, write_err = BafClient.commit_schedule_and_verify(ip, new_raw, 5)
+  if not ok then
+    log.error("BAF setScheduleEnabled: write did not verify: " .. tostring(write_err))
+    return
+  end
+  device:emit_component_event(device.profile.components.schedule,
+    SCHEDULE_ENABLED_CAP.scheduleEnabled({ value = want_enabled and "On" or "Off" }))
+end
+
 local function fan_beep_on(driver, device, command)
   send_more_commit(device, "fan_beep_enable", true)
 end
@@ -1191,6 +1324,10 @@ local function refresh_handler(driver, device, command)
     return
   end
   poll_once(driver, device)
+  local ok, err = pcall(apply_schedule_status, driver, device)
+  if not ok then
+    log.error("BAF apply_schedule_status crashed during refresh: " .. tostring(err))
+  end
 end
 
 local function add_another_handler(driver, device, command)
@@ -1306,6 +1443,16 @@ local baf_driver = Driver("bigassfans-i6-lan", {
     },
     [WAKE_UP_MOTION_TIMEOUT_CAP.ID] = {
       ["setWakeUpMotionTimeout"] = set_wake_up_motion_timeout,
+    },
+    -- Schedule (2026-09-02): literal string command names, same
+    -- just-created-capability propagation-lag caution as the Sleep
+    -- capabilities above.
+    [SHOW_SCHEDULE_CAP.ID] = {
+      ["turnOn"] = show_schedule_on,
+      ["turnOff"] = show_schedule_off,
+    },
+    [SCHEDULE_ENABLED_CAP.ID] = {
+      ["setScheduleEnabled"] = set_schedule_enabled,
     },
     [capabilities.refresh.ID] = {
       [capabilities.refresh.commands.refresh.NAME] = refresh_handler,

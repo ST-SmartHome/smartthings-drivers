@@ -134,10 +134,20 @@ a commit on a connection that opened with an identity query first.
     `wakeUpBrightness` needs to show for both `wakeUpMode` "On" and
     "Auto", so this gate folds both into a single "On" value for it to
     match against.
+  - `schedule` — binds SmartThings to the fan's own on-device schedule
+    (decoded via a real pcap — see `baf_protocol.lua`'s "Schedule write
+    path" comment). Scoped to enabling/disabling ONE schedule, matched by
+    exact name via the `scheduleName` preference — always read-modify-
+    write (never constructs a schedule from scratch), since the exact
+    rules for schedule capacity/write semantics are still not fully
+    understood. Same `showSchedule` phantom-switch collapsible pattern as
+    Device Settings/Sleep.
   - Preferences: "Manual IP Override" (`ipAddress`, sentinel
     `0.0.0.0` meaning "use the mDNS-discovered address"), `pollInterval`,
-    "Hide 'Add Another Fan' Button" (`hideAddFan`), and "No Physical
-    Light" (`noLight`). No secrets to enter — see protocol notes above.
+    "Hide 'Add Another Fan' Button" (`hideAddFan`), "No Physical
+    Light" (`noLight`), and `scheduleName` (which on-device schedule the
+    `schedule` component's toggle controls, by exact name match). No
+    secrets to enter — see protocol notes above.
 - `src/slip.lua` — SLIP encode/decode.
 - `src/protobuf.lua` — minimal hand-written protobuf wire codec (varint +
   length-delimited encode/decode). Not a general protobuf library — just
@@ -207,13 +217,14 @@ script, and unit-test the Lua wire-format code against it directly.
   `.proto` (e.g. 207) are silently ignored.
 - mDNS reflection across VLANs depends on your router's multicast-DNS
   setting — untested with the fan on a different VLAN from the hub.
-- Schedule *read* is decoded and confirmed live. Schedule *write* is now
-  decoded too (`Commit`'s field 4 — see `baf_protocol.lua`'s "Schedule
-  write path" comment for the full write-up), confirmed via a real pcap
-  of the app creating, editing, and deleting schedule entries — an
-  earlier claim that schedule writes go through BAF's cloud API instead
-  was too broad, based on one screen that happened not to show it. Not
-  yet built as a real capability; `build_commit` also needs new nested-
-  message encode support first, not just a new `FIELDS` entry.
+- Schedule read/write is shipped (see the `schedule` component below) but
+  scoped to enabling/disabling ONE named schedule — full schedule
+  creation/editing (day/time/action) is still unbuilt. The `scheduleName`
+  preference defaults to a disposable test-schedule name for safety, not
+  a real one — point it at your own schedule's exact name once ready.
+- The `schedule` section's `showSchedule` phantom switch needs one more
+  driver restart (a hub reboot, per this project's usual "install doesn't
+  guarantee restart" gotcha) to seed its default — cosmetic only, the
+  real `scheduleEnabled` toggle already works regardless.
 - Motion sensing (field 52) works at the protocol level but isn't
   exposed as a SmartThings capability yet.

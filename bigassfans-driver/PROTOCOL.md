@@ -131,12 +131,30 @@ section should be its own collapsible menu (the same phantom-switch
 pattern this driver already uses for its Device Settings section), not
 folded into an existing component.
 
-**Not yet built as a real feature** — `build_commit` still has no encode
-support for a nested field-4 message at all (the standalone harness
-proves the wire format works for the two fully-decoded shapes, but real
-new encode machinery is still needed in the driver itself), plus a
-capability, command handler, and live 3-way verification, same as every
-other feature in this driver.
+**SHIPPED — `scheduleEnabled` capability live, verified end-to-end.**
+Scoped to enabling/disabling ONE schedule, matched by exact name via a
+`scheduleName` preference — never constructs a schedule from scratch,
+always reads the real one first and patches only field 6 (the enable
+flag) via a position-aware, top-level-field-only walk (not a naive
+whole-buffer byte search — a real substring collision was caught and
+fixed before shipping: field 5's top-level encoding also happens to
+appear nested inside a schedule's own action sub-structure).
+
+**A real bug found and fixed during the first live end-to-end test**:
+the write handler originally reused a schedule's own read-side "slot"
+value (the outer wrap's field 1) as the write's target — the write
+silently had no effect. That slot field is **not** a stable per-schedule
+write target — both schedules on a real fan were observed reporting the
+identical value simultaneously (more likely some kind of revision/
+generation counter) — **the write's slot argument must always be the
+fixed value `1`**, matching what the real official app used for every
+create/edit in the original pcap regardless of the schedule's own
+read-side slot. Fixed (verification now matches by schedule name, not
+slot number), redeployed, confirmed live: real `setScheduleEnabled`
+commands sent through the actual SmartThings API correctly toggled a
+test schedule off and back on, independently re-verified via a direct
+probe outside SmartThings each time, with the real, already-configured
+schedule confirmed completely untouched throughout every test.
 
 ## `Capabilities` submessage (field 17, SENSORS category)
 

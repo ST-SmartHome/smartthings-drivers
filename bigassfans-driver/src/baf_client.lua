@@ -9,6 +9,7 @@
 local socket = require "cosock.socket"
 local slip = require "slip"
 local baf = require "baf_protocol"
+local pb = require "protobuf"
 
 local BAF_PORT = 31415
 local MAX_FRAME_BYTES = 8192 -- safety cap against a runaway/garbled stream
@@ -318,6 +319,112 @@ function BafClient.commit_and_verify_more(ip, props, timeout_sec)
 
   sock:close()
   return true, verified
+end
+
+--- Sends a SCHEDULES query and reads EVERY response frame, not just the
+--- first one — confirmed 2026-09-02 that the fan sends one frame PER
+--- schedule, and a probe that stopped after the first frame produced a
+--- false "the fan only has one schedule slot" alarm (see
+--- baf_protocol.lua's "Schedule write path" comment for the full
+--- writeup). Reads to a genuine idle timeout per frame, same pattern as
+--- commit_and_verify_more's push-burst read, rather than assuming any
+--- fixed frame count. Returns a list of baf.parse_schedule_frame results
+--- (possibly empty if the fan has no schedules configured at all).
+function BafClient.query_schedules(ip, timeout_sec)
+  local sock, err = socket.tcp()
+  if not sock then
+    return nil, "socket create failed: " .. tostring(err)
+  end
+  sock:settimeout(timeout_sec or 5)
+
+  local ok, connect_err = sock:connect(ip, BAF_PORT)
+  if not ok then
+    sock:close()
+    return nil, "connect failed: " .. tostring(connect_err)
+  end
+
+  local message = baf.build_query(baf.QUERY_CATEGORY.SCHEDULES)
+  local sent, send_err = sock:send(slip.encode(message))
+  if not sent then
+    sock:close()
+    return nil, "send failed: " .. tostring(send_err)
+  end
+
+  sock:settimeout(0.5)
+  local schedules = {}
+  for _ = 1, 20 do -- generous headroom; a genuine idle timeout ends the loop
+    local frame = read_slip_frame(sock)
+    if not frame then
+      break
+    end
+    local payload = slip.decode(frame)
+    local sched = baf.parse_schedule_frame(payload)
+    if sched then
+      table.insert(schedules, sched)
+    end
+  end
+
+  sock:close()
+  return schedules
+end
+
+--- Writes a schedule (see baf.build_schedule_commit) and re-reads
+--- schedules afterward to verify the write actually landed and no other
+--- schedule was disturbed.
+---
+--- **The write's own slot argument is ALWAYS 1, hardcoded here, not a
+--- caller-supplied value.** Confirmed live 2026-09-02: a QueryResult's
+--- own field-1 "slot" (what baf.parse_schedule_frame calls `sched.slot`)
+--- is NOT a stable per-schedule identity a write can target back --
+--- reusing a just-read slot value for a write silently failed (verify
+--- query showed the schedule completely unchanged), while writing with
+--- a fixed `1` (matching what the real official app used for every
+--- create/edit captured in the original pcap, regardless of the
+--- schedule's own read-side slot) worked correctly every time. Given
+--- this, verification below matches by NAME (which fields the write
+--- actually changed a schedule's name, this driver never does), not by
+--- comparing against whatever slot number a later read happens to
+--- report -- that number appears to be some kind of revision/generation
+--- counter, not a write target, and both schedules on a real fan have
+--- been observed reporting the identical value at the same moment.
+---
+--- Returns true, nil on a clean verified write; false, error otherwise
+--- (the write may still have landed even on a verify failure -- this
+--- only distinguishes "confirmed correct" from "not confirmed", same
+--- fire-and-forget caveat as every other commit in this driver).
+function BafClient.commit_schedule_and_verify(ip, schedule_bytes, timeout_sec)
+  local sock, err = socket.tcp()
+  if not sock then
+    return false, "socket create failed: " .. tostring(err)
+  end
+  sock:settimeout(timeout_sec or 5)
+
+  local ok, connect_err = sock:connect(ip, BAF_PORT)
+  if not ok then
+    sock:close()
+    return false, "connect failed: " .. tostring(connect_err)
+  end
+
+  local message = baf.build_schedule_commit(1, schedule_bytes)
+  local sent, send_err = sock:send(slip.encode(message))
+  sock:close()
+  if not sent then
+    return false, "send failed: " .. tostring(send_err)
+  end
+
+  local schedules, query_err = BafClient.query_schedules(ip, timeout_sec)
+  if not schedules then
+    return false, "write sent but verify query failed: " .. tostring(query_err)
+  end
+  local parse_ok, parsed_fields = pcall(pb.parse_fields, schedule_bytes)
+  local name = parse_ok and baf.schedule_name({ fields = parsed_fields }) or nil
+  for _, sched in ipairs(schedules) do
+    if baf.schedule_name(sched) == name and sched.raw == schedule_bytes then
+      return true
+    end
+  end
+  return false, "write sent but did not verify -- no schedule named " ..
+    tostring(name) .. " matched the expected content"
 end
 
 return BafClient
