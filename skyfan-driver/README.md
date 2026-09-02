@@ -153,6 +153,18 @@ smartthings edge:drivers:logcat b079f7d0-c6fd-4704-b760-131a6b660307 --hub-addre
 
 ## Changelog
 
+**2026-09-02 — the 2026-09-01 fix below is now confirmed fully live; a
+real, separate profile-tracking bug was found and fixed along the way.**
+The 09-01 profile bump never updated the driver's own hardcoded
+profile-ID constants used to detect "is this device already on the right
+profile" — so the switch to the new profile (and therefore the fan-speed
+fix) was silently never requested, on any device, regardless of how many
+times the driver was redeployed or the hub rebooted. Fixed; all fans
+switched over in one redeploy. Confirmed live end-to-end: the fan-speed
+slider now genuinely shows the corrected 1–5 range and labels, and a real
+direction-reversal command was watched via live logs — stop committed,
+confirmed stopped, only then reversed, exactly as designed.
+
 **2026-09-01 — fan-speed slider fix + direction-reversal safety
 interlock.** The native fan speed range (DP3) is 1–5, but the app's
 slider had never been overridden from the stock `fanSpeed` capability's
