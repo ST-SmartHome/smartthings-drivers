@@ -180,6 +180,17 @@ baf.FIELDS = {
   wake_up_brightness          = { no = 108, kind = "int",  category = "LIGHT", default = 0 },   -- percent
   wake_up_motion_timeout_secs = { no = 128, kind = "int",  category = "LIGHT", default = 600 },
 
+  -- 2026-09-02: found via a real pcap while narrating a schedule-editing
+  -- walkthrough one field at a time -- committed value 1800 landed exactly
+  -- where the narration said "Motion timeout 30min" (1800s = 30min),
+  -- immediately after the Light-Auto mode screen. NOT the same field as
+  -- the already-confirmed wake_up_motion_timeout_secs(128) -- this is the
+  -- Sleep tab's own Light-Auto preset's motion timeout, a separate control
+  -- from the Wake Up preset's. Single narrated data point, not an isolated
+  -- toggle-only test like the fields above -- treat as strong-but-not-
+  -- fully-isolated confidence until independently re-tested.
+  sleep_light_auto_motion_timeout_secs = { no = 117, kind = "int", category = "LIGHT" },
+
   -- ===== 2026-08-29 pcap discovery — Comfort/Motion screens, NOT YET
   -- CONFIRMED. Decoded from raw commit values captured while navigating
   -- the official app's Comfort and Motion screens, same methodology as
@@ -427,5 +438,70 @@ function baf.decode_light_capability(raw_bytes)
   local has_uplight = pb.last(sub_fields, 6)
   return (has_light ~= nil and has_light ~= 0) or (has_uplight ~= nil and has_uplight ~= 0)
 end
+
+-- ===== Schedule write path — DECODED 2026-09-02, NOT YET IMPLEMENTED =====
+--
+-- Confirmed via a real pcap capture of the official app editing the fan's
+-- on-device schedules, narrated one action at a time. This is a real,
+-- previously-unknown local write path -- nobody (this driver, aiobafi6,
+-- homebridge-i6-bigAssFans) had ever found it before; every earlier
+-- session's attempt concluded schedule writes must go through BAF's cloud
+-- API, based on one specific screen (the app's own "Add Schedule" Wake
+-- Up/Bedtime time pickers) showing zero local commits during that window.
+-- That conclusion was too broad -- schedule writes ARE local, that one
+-- screen's specific save action just happened not to be captured, or used
+-- a different path than the one found here.
+--
+-- **`Commit` has a field 4, never modeled before**: `Root{2: Root2{2:
+-- Commit{3: properties, 4: ScheduleWrite}}}`. `ScheduleWrite` is `{1:
+-- <slot index, varint>, 2: <Schedule message, or empty for a delete>}`.
+-- Three real captured examples, all against slot 1 except the delete:
+--
+-- 1. Re-saving the existing "My Schedule" unchanged (a light-type
+--    schedule): `4: {1: 1, 2: {2: "My Schedule", 4: [1,2,3,4,5,6,7],
+--    5: 1, 6: 1, 7: {1: "17:00", 2: {5: 2}, 2: {18: 10800}}}}` -- content
+--    byte-identical to this schedule's already-known read-side decode
+--    (day list, name, 17:00, light_mode=2/Auto via nested field 5, motion
+--    timeout 10800s via nested field 18). Fields 5/6 (both varint 1 here)
+--    are plausible "enabled" flags, not independently isolated from this
+--    one capture alone.
+-- 2. A brand new schedule saved (a Bedtime/Wake-Up-type schedule, no
+--    name, no light action): `4: {1: 1, 2: {1: 1, 4: [2,3,4,5,6,7,1],
+--    5: 2, 6: 1, 7: {1: "23:00"}, 8: {1: "06:00"}}}` -- day list is the
+--    same 7 values as the light schedule's, just serialized in a
+--    different order (harmless). Field 7/8 here are simple {1: STR time}
+--    messages (Bedtime/Wake time), a genuinely different shape from the
+--    light schedule's field 7 -- confirms `Schedule.7`'s content depends
+--    on the schedule's own type, not a single fixed structure. Notably,
+--    none of the individual Sleep sub-setting values configured earlier
+--    in the same capture session (sleep_fan_mode, sleep_timer_*,
+--    sleep_brightness_*, wake_up_*) appear anywhere in this schedule's
+--    own payload -- they were separately committed via the normal
+--    `Commit{3: properties}` path (see the individual FIELDS entries
+--    above), all confirmed matching real narrated UI actions field-for-
+--    field. Best-supported reading: a Bedtime/Wake-Up schedule doesn't
+--    carry its own snapshot of Sleep settings at all -- it just triggers
+--    Sleep Mode on/off at the given times, using whatever the fan's own
+--    live Sleep configuration already is at trigger time (which is
+--    exactly why the app lets you edit those live settings from the same
+--    schedule-creation flow).
+-- 3. Deleting the schedule created in (2): `4: {1: 2, 2: {1: 1}}` -- note
+--    slot index 2 here, not 1 (the two schedules may have landed in
+--    different slots, or slot indexing isn't simply "the Nth schedule" --
+--    not resolved from this one capture). Payload is nearly empty (just
+--    a bare `{1: 1}`), consistent with a delete needing little more than
+--    a slot reference.
+--
+-- **Not yet built as a real feature.** This is a decode/discovery
+-- finding, same stage every other feature in this file started at before
+-- being wired into a capability + command handler + profile placement +
+-- live 3-way verification (see project-status memory for that whole
+-- process, repeated for every prior feature). Before building: the slot-
+-- index semantics (why slot 2 for the delete, not 1) and the exact
+-- meaning of Schedule fields 1/5/6 (varying between the two captured
+-- shapes) need at least one more isolated test each, and build_commit
+-- has no encode support for a nested field-4 message at all yet (it only
+-- ever builds flat `{field_no = value}` property tables) -- would need
+-- real new encode machinery, not just a new FIELDS entry.
 
 return baf

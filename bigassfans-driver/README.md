@@ -207,8 +207,13 @@ script, and unit-test the Lua wire-format code against it directly.
   `.proto` (e.g. 207) are silently ignored.
 - mDNS reflection across VLANs depends on your router's multicast-DNS
   setting — untested with the fan on a different VLAN from the hub.
-- No write path for the fan's own on-device schedule — a packet capture
-  showed schedule edits go through BAF's cloud API, not this driver's
-  local protocol.
+- Schedule *read* is decoded and confirmed live. Schedule *write* is now
+  decoded too (`Commit`'s field 4 — see `baf_protocol.lua`'s "Schedule
+  write path" comment for the full write-up), confirmed via a real pcap
+  of the app creating, editing, and deleting schedule entries — an
+  earlier claim that schedule writes go through BAF's cloud API instead
+  was too broad, based on one screen that happened not to show it. Not
+  yet built as a real capability; `build_commit` also needs new nested-
+  message encode support first, not just a new `FIELDS` entry.
 - Motion sensing (field 52) works at the protocol level but isn't
   exposed as a SmartThings capability yet.
