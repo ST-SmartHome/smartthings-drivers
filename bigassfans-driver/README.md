@@ -114,15 +114,26 @@ a commit on a connection that opened with an identity query first.
     Configuration (`config.yml`'s embedded `config:` block doesn't
     support this — see the code comments in `init.lua`/
     `apply_sleep_status` for the full mechanism and its platform
-    incompatibilities). Since `sleepMode` and `sleepAutoMode`/
-    `sleepBrightnessMode`/`wakeUpMode` are independent fields with no
-    real coupling in the protocol, three headless "gate" capabilities
-    (`sleepAutoModeGate`, `sleepBrightnessModeGate`, `wakeUpModeGate` —
+    incompatibilities). `sleepMode` is deliberately placed *first* in the
+    `sleep` component and left ungated: the platform can never fully hide
+    a section's first `detailView` tile at all (confirmed via a live
+    position-swap test — it renders disabled instead, regardless of
+    `hideOnUnmatch` or what references it), so an always-visible anchor
+    tile is required to free every other field to hide correctly. Since
+    `sleepMode` and `sleepAutoMode`/`sleepBrightnessMode`/`wakeUpMode` are
+    independent fields with no real coupling in the protocol, four
+    headless "gate" capabilities (`sleepAutoModeGate`,
+    `sleepBrightnessModeGate`, `wakeUpModeGate`, `wakeUpBrightnessGate` —
     never rendered themselves, no presentation) fold `sleepMode`'s state
     into a value the sub-fields' `visibleCondition`s can actually chain
     on; each fails *open* (stays visible) if `sleepMode`'s own MORE-push
     value hasn't been captured yet, rather than collapsing the whole
-    section on every driver restart.
+    section on every driver restart. `wakeUpBrightnessGate` exists
+    specifically because `visibleCondition` only ever accepts a single
+    `EQUALS` operand (`ONE_OF`/`NOT_EQUALS` both get real `400`s) —
+    `wakeUpBrightness` needs to show for both `wakeUpMode` "On" and
+    "Auto", so this gate folds both into a single "On" value for it to
+    match against.
   - Preferences: "Manual IP Override" (`ipAddress`, sentinel
     `0.0.0.0` meaning "use the mDNS-discovered address"), `pollInterval`,
     "Hide 'Add Another Fan' Button" (`hideAddFan`), and "No Physical
