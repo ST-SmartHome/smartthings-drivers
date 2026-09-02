@@ -37,8 +37,8 @@ local VALID_WORK_MODES = {Warmwhite = true, Naturalwhite = true, Coolwhite = tru
 -- here (`skyfan-dc-tuya-1`, `skyfan-dc-tuya-<timestamp>-<random>` from
 -- "Add another fan") never end in "-light", so there's no collision risk.
 --
--- Piloted on one real fan first before being made automatic here for
--- every fan with a physical light, including ones
+-- Piloted on one fan first before being made
+-- automatic here for every fan with a physical light, including ones
 -- added in the future — confirmed working end-to-end on this driver's
 -- own Tuya/DPS write path specifically, not just carried over from
 -- bigassfans-driver's confirmation. See skyfan-driver-project-status
@@ -279,9 +279,9 @@ end
 -- from before this feature existed, so no already-deployed device moves
 -- unless its preferences actually change.
 local WITH_LIGHT_PROFILE = "skyfan-dc.v6"
-local NO_LIGHT_PROFILE = "skyfan-dc-no-light.v1"
+local NO_LIGHT_PROFILE = "skyfan-dc-no-light.v2"
 local NO_ADDFAN_PROFILE = "skyfan-dc-no-addfan.v1"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "skyfan-dc-no-light-no-addfan.v1"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "skyfan-dc-no-light-no-addfan.v2"
 
 --- Which profile a device should be on right now, given its currently-saved
 --- noLight/hideAddFan preferences. Defaults to the original with-light,
@@ -317,10 +317,32 @@ local ACTIVE_PROFILE_FIELD = "active_profile"
 -- smartthings-edge-driver-gotchas memory) — but comparing it against its
 -- own real UUID is meaningful and is the only reliable source of truth for
 -- what profile a device is *actually* on right now.
+-- 2026-09-02: the 2026-09-01 fanSpeed-range/direction-interlock work bumped
+-- these two profiles (.v1->.v2, metadata.vid added) but never updated their
+-- IDs here, so ensure_correct_profile kept comparing against the OLD
+-- profile UUID and never once requested the switch, on any device, through
+-- any number of redeploys or hub reboots. NO_LIGHT_NO_ADDFAN_PROFILE_ID is
+-- now the REAL live value, confirmed empirically via a direct device read
+-- after the fix deployed (all 8 real fans landed here in one redeploy, no
+-- reboot needed) -- note this is NOT the same UUID as profile.yml's own
+-- metadata.vid (0b1589ed-bdd4-3955-b9bf-948e0cee3121): device.profile.id is
+-- the underlying DeviceProfile resource's own auto-generated ID, a
+-- different resource from the presentation vid, don't conflate the two
+-- again. NO_LIGHT_PROFILE_ID has no live device to confirm against right
+-- now (every fan currently has hideAddFan=true) -- left nil rather than a
+-- plausible-looking guessed UUID, same reasoning bigassfans-driver already
+-- established: an honest nil (forces an unconditional switch attempt,
+-- harmless by design) is safer than a wrong-looking-right value. Fill in
+-- for real the same way this driver's other confirmed IDs were obtained:
+-- toggle hideAddFan off on a no-light fan, let it switch, read
+-- device.profile.id back. WITH_LIGHT_PROFILE_ID/NO_ADDFAN_PROFILE_ID are
+-- untouched -- those two profiles have no vid (still embedded-config-only)
+-- and no real device rests on them long enough for a stale ID here to
+-- matter in practice.
 local WITH_LIGHT_PROFILE_ID = "07f4d74f-0463-378c-9796-87cd62302025"
-local NO_LIGHT_PROFILE_ID = "ea46b612-81c6-30d6-a1d4-c2dd0c3f7b10"
+local NO_LIGHT_PROFILE_ID = nil
 local NO_ADDFAN_PROFILE_ID = "13d30ff3-d727-3988-b1ef-e761a6744bbf"
-local NO_LIGHT_NO_ADDFAN_PROFILE_ID = "66f2e67d-4d23-34a3-8324-7aff58002d30"
+local NO_LIGHT_NO_ADDFAN_PROFILE_ID = "eb4dc99c-d551-3e10-ad7d-32a214f98d69"
 
 local PROFILE_TO_ID = {
   [WITH_LIGHT_PROFILE] = WITH_LIGHT_PROFILE_ID,
@@ -528,8 +550,70 @@ local function set_mode(driver, device, command)
   send_dp(driver, device, {["2"] = command.args.mode}, true)
 end
 
+-- 2026-09-01: added a stop-the-fan-first interlock before committing a
+-- direction change, ported from bigassfans-driver after a real incident
+-- there proved that committing a reverse while the fan was still
+-- spinning is a real risk, not a theoretical one (a fan ended up
+-- reversed at full speed). Skyfan's set_direction was deliberately left
+-- untouched during the earlier light-child-split work (see that section
+-- above) since no failure had been observed here specifically -- this
+-- closes the same gap as a precaution now, not in response to an
+-- incident on this hardware.
+local DIRECTION_STOP_VERIFY_DELAY_SECONDS = 2
+local MAX_STOP_ATTEMPTS = 3
+
+--- Re-queries status and, once DP1 (switch) confirms off, commits DP8
+--- (direction) and refreshes. Retries the stop commit up to
+--- MAX_STOP_ATTEMPTS times if the fan hasn't confirmed stopped yet.
+--- `s` (settings) is resolved once by the caller and threaded through,
+--- since this runs from scheduled callbacks rather than a fresh command
+--- invocation. Wrapped in pcall for the same reason as poll_once -- an
+--- uncaught error here must not propagate out of a scheduled callback.
+local function verify_stopped_then_set_direction(driver, device, s, target_direction, attempt)
+  local ok, err = pcall(function()
+    local dps, query_err = TuyaClient.query_status(s.ip, s.local_key, s.device_id, 5)
+    if dps and dps["1"] == false then
+      apply_fan_status(device, dps)
+      local committed, commit_err = TuyaClient.set_dps(s.ip, s.local_key, s.device_id, {["8"] = target_direction}, 5)
+      if not committed then
+        log.error("Skyfan DC direction commit failed after confirming stopped: " .. tostring(commit_err))
+        return
+      end
+      refresh_after_command(driver, device)
+      return
+    end
+    if attempt < MAX_STOP_ATTEMPTS then
+      log.warn("Skyfan DC fan not yet confirmed stopped before direction change (attempt " ..
+        attempt .. "), resending stop: " .. tostring(query_err))
+      TuyaClient.set_dps(s.ip, s.local_key, s.device_id, {["1"] = false}, 5)
+      device.thread:call_with_delay(DIRECTION_STOP_VERIFY_DELAY_SECONDS, function()
+        verify_stopped_then_set_direction(driver, device, s, target_direction, attempt + 1)
+      end)
+    else
+      log.error("Skyfan DC fan did not confirm stopped after " .. attempt ..
+        " attempts -- aborting direction change for motor safety")
+      poll_once(driver, device)
+    end
+  end)
+  if not ok then
+    log.error("Skyfan DC stop-then-direction sequence crashed: " .. tostring(err))
+  end
+end
+
 local function set_direction(driver, device, command)
-  send_dp(driver, device, {["8"] = command.args.direction}, true)
+  local s = get_settings(device)
+  if not s.ip or not s.local_key or not s.device_id then
+    log.warn("Skyfan DC setDirection attempted before device is fully configured")
+    return
+  end
+  local stopped, err = TuyaClient.set_dps(s.ip, s.local_key, s.device_id, {["1"] = false}, 5)
+  if not stopped then
+    log.error("Skyfan DC direction-change stop commit failed: " .. tostring(err))
+    return
+  end
+  device.thread:call_with_delay(DIRECTION_STOP_VERIFY_DELAY_SECONDS, function()
+    verify_stopped_then_set_direction(driver, device, s, command.args.direction, 1)
+  end)
 end
 
 local function set_countdown(driver, device, command)
