@@ -1,7 +1,7 @@
-name: bigassfans-h-no-light-no-addfan.v26
+name: bigassfans-h-no-light-no-addfan.v27
 metadata:
   mnmn: SmartThingsCommunity
-  vid: 6f17211d-398f-39d3-bb5b-3a5f3c70a569
+  vid: d454dfcf-7526-39a8-8979-c99d364a4adb
 components:
   - id: main
     label: "Fan+Light"
@@ -69,6 +69,8 @@ components:
       - id: examplens.wakeUpMode
         version: 1
       - id: examplens.wakeUpModeGate
+        version: 1
+      - id: examplens.wakeUpBrightnessGate
         version: 1
       - id: examplens.wakeUpBrightness
         version: 1

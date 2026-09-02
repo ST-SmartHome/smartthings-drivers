@@ -33,15 +33,19 @@ local ADD_ANOTHER_CAP = capabilities["examplens.addAnotherFan"]
 -- via the normal send_commit/verify_commit path.
 local SLEEP_FAN_MODE_CAP = capabilities["examplens.sleepAutoMode"]
 -- Headless mirror of sleepAutoMode's own value (2026-08-29), never shown
--- in the app itself (no detailView entry) -- exists purely so the 7
--- sub-fields that need to gate on "is Sleep Auto Mode On/Auto" can
--- reference THIS capability in their visibleCondition instead of
--- sleepAutoMode directly. Confirmed live: a capability that other
--- fields' visibleCondition depend on can't itself be fully hidden by its
--- OWN visibleCondition -- the app forces it to render disabled instead,
--- regardless of hideOnUnmatch's value (tried both true and false, no
--- difference). Breaking the "referenced by" relationship via this mirror
--- is the workaround -- see project-status memory for the full writeup.
+-- in the app itself (no detailView entry). Real purpose (corrected
+-- 2026-09-02 -- an earlier version of this comment attributed it to a
+-- "can't hide a referenced-by capability" theory that live testing later
+-- disproved; the actual platform bug is that a section's FIRST detailView
+-- tile can never fully hide, regardless of what references it, worked
+-- around by putting sleepMode itself first instead -- see project-status
+-- memory and this file's own sleep_mode_enable comment for that fix):
+-- sleepMode (the master Sleep Mode switch, its own separate MORE_PUSH-only
+-- field) has no effect on sleepAutoMode's own real value on its own, so
+-- the 7 sub-fields that should hide whenever Sleep Mode is off need to
+-- gate on THIS capability instead of sleepAutoMode directly -- it folds
+-- sleepMode's state in (see apply_sleep_status below), sleepAutoMode alone
+-- never could.
 local SLEEP_FAN_MODE_GATE_CAP = capabilities["examplens.sleepAutoModeGate"]
 local SLEEP_SPEED_CAP = capabilities["examplens.sleepSpeed"]
 local SLEEP_IDEAL_TEMP_CAP = capabilities["examplens.sleepIdealTemperature"]
@@ -61,6 +65,15 @@ local SLEEP_BRIGHTNESS_MODE_GATE_CAP = capabilities["examplens.sleepBrightnessMo
 local SLEEP_BRIGHTNESS_PERCENT_CAP = capabilities["examplens.sleepBrightnessPercent"]
 local WAKE_UP_MODE_CAP = capabilities["examplens.wakeUpMode"]
 local WAKE_UP_MODE_GATE_CAP = capabilities["examplens.wakeUpModeGate"]
+-- wakeUpBrightness should show for BOTH wakeUpMode "On" and "Auto" (Wake
+-- Up brightness matters whenever the light does something at wake time),
+-- but visibleCondition only ever accepted a single EQUALS operand --
+-- ONE_OF (array operand) and NOT_EQUALS both got real 400 BadRequestErrors
+-- from presentation:device-config:create (2026-08-28), confirmed still
+-- true. Same fold-a-derived-gate pattern as the others: folds
+-- wakeUpModeGate's On/Auto/Off into a plain On/Off, so wakeUpBrightness
+-- can gate on a single EQUALS "On" against THIS instead.
+local WAKE_UP_BRIGHTNESS_GATE_CAP = capabilities["examplens.wakeUpBrightnessGate"]
 local WAKE_UP_BRIGHTNESS_CAP = capabilities["examplens.wakeUpBrightness"]
 local WAKE_UP_MOTION_TIMEOUT_CAP = capabilities["examplens.wakeUpMotionTimeout"]
 
@@ -280,6 +293,9 @@ local function apply_sleep_status(device, fan, light)
     device:emit_component_event(sleep_component,
       WAKE_UP_MODE_GATE_CAP.wakeUpModeGate({ value = wake_gate_value }))
     device:emit_component_event(sleep_component,
+      WAKE_UP_BRIGHTNESS_GATE_CAP.wakeUpBrightnessGate(
+        { value = (wake_gate_value ~= "Off") and "On" or "Off" }))
+    device:emit_component_event(sleep_component,
       WAKE_UP_BRIGHTNESS_CAP.wakeUpBrightness({ value = light.wake_up_brightness, unit = "%" }))
     device:emit_component_event(sleep_component,
       WAKE_UP_MOTION_TIMEOUT_CAP.wakeUpMotionTimeout({ value = math.floor(light.wake_up_motion_timeout_secs / 60), unit = "min" }))
@@ -340,8 +356,8 @@ local function poll_once(driver, device)
     -- same connection, no extra TCP overhead.
     --
     -- One immediate retry on failure: found 2026-08-22 that on a
-    -- sufficiently lossy Wi-Fi network (one household network was seen
-    -- running ~40% TX retry rates on both fans, unrelated to this driver)
+    -- sufficiently lossy Wi-Fi network (real households have seen ~40%
+    -- TX retry rates on the fan's own Wi-Fi, unrelated to this driver)
     -- poll_once fails with "read failed waiting for start delimiter:
     -- timeout" on roughly 1-in-5 cycles per fan — a lost/delayed response,
     -- not a slow one, so a longer timeout wouldn't help; a fresh attempt
@@ -649,7 +665,7 @@ end
 local WITH_ADDFAN_PROFILE = "bigassfans-h.v8"
 local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v8"
 local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v9"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v26"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v27"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
 -- All four reset to nil after the 2026-08-27 v2->v3 bump above (a new
@@ -716,11 +732,11 @@ local function ensure_correct_profile(driver, device)
 end
 
 --- Automatic for every fan with a physical light — no per-device opt-in
---- anymore. Piloted behind a splitLightDevice preference on one fan
---- first (2026-08-25: created, confirmed mirroring state both
---- directions and controlling the real light, confirmed as its own
---- separate Alexa device) before making it unconditional here for every
---- other fan too, including ones added in the future. Still skipped for
+--- anymore. Piloted behind a splitLightDevice preference on one fan first
+--- (2026-08-25: created, confirmed mirroring state both directions and
+--- controlling the real light, confirmed as its own separate Alexa
+--- device) before making it unconditional here for every other fan too,
+--- including ones added in the future. Still skipped for
 --- a noLight device — nothing to split off if there's no physical light
 --- kit. Idempotent via find_light_child (observed state), so safe to
 --- call on every init. Deliberately does NOT also switch this device's
@@ -920,7 +936,7 @@ end
 
 -- CORRECTED 2026-08-25: the "never takes effect" conclusion that removed
 -- this handler was wrong — reverse_enable does get committed, just with
--- an unpredictable delay (confirmed when a fan turned up
+-- an unpredictable delay (confirmed when a real fan turned up
 -- running reverse_enable=true, well after the original short wait-then-
 -- verify test looked like it failed; see project-status memory for the
 -- full writeup and the incident that caught it). Handler restored.
@@ -933,7 +949,7 @@ end
 --
 -- 2026-08-25: added a stop-the-fan-first interlock, since this original
 -- code committed reverse_enable directly regardless of whether the fan
--- was spinning -- the exact sequence that likely put a fan
+-- was spinning -- the exact sequence that likely put the fan
 -- into reverse at full speed in the first place, and was worked around
 -- manually (stop, verify stopped, then flip) via the standalone fix
 -- script when that incident was caught. That manual sequence is now
