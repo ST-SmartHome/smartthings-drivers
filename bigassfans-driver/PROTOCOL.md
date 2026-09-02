@@ -87,16 +87,36 @@ delete>}`. Three real captured examples:
   the given times using whatever the fan's live Sleep configuration
   already is, rather than carrying its own snapshot.
 - Deleting that schedule: `4: {1: 2, 2: {1: 1}}` — note slot index 2
-  here, not the 1 both saves used; slot-index semantics aren't resolved
-  from this one capture.
+  here, not the 1 both saves used.
 
-**Not yet built as a real feature** — the slot-index semantics and the
-exact meaning of `Schedule` fields 1/5/6 (which varied between the two
-captured shapes) need at least one more isolated test each, and
-`build_commit` has no encode support for a nested field-4 message yet
-(it only ever builds flat `{field_no = value}` property tables) — real
-new encode machinery is needed, not just a `FIELDS` entry, before this
-can actually be written from the driver.
+**CRITICAL correction, confirmed live against real hardware via a
+standalone harness**: this fan has **exactly one schedule slot, not a
+list**. A generic protobuf encoder was built and verified byte-for-byte
+against the captured re-save frame above before touching real hardware,
+then tested: re-saving "My Schedule" unchanged round-tripped
+byte-identical (safe) — but creating a *second*, differently-named
+schedule **replaced** "My Schedule" outright rather than adding
+alongside it (confirmed via a proper multi-frame read, not a
+single-frame artifact). Immediately restored "My Schedule" from the
+byte-verified re-save and confirmed full recovery — no lasting harm, but
+a real near-miss. This also explains the slot-index mystery above: the
+field-1 value in a write request doesn't appear to be meaningfully
+checked by the fan at all (every write in both the original pcap and
+this follow-up test used `1` and landed correctly regardless of the
+schedule's actual internal slot, which the fan manages on its own).
+
+**Practical implication**: this is not "add a schedule," it's "replace
+the fan's one on-device schedule." Any real capability must default to
+read-modify-write (fetch the existing schedule, change only what's
+needed, write it back) and never construct one from scratch, to avoid
+silently destroying whatever a user already has configured through the
+official app.
+
+**Not yet built as a real feature** — `build_commit` still has no encode
+support for a nested field-4 message at all (the standalone harness
+proves the wire format works, but real new encode machinery is still
+needed in the driver itself), plus a capability, command handler, and
+live 3-way verification, same as every other feature in this driver.
 
 ## `Capabilities` submessage (field 17, SENSORS category)
 
