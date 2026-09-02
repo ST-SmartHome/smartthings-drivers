@@ -153,6 +153,20 @@ smartthings edge:drivers:logcat b079f7d0-c6fd-4704-b760-131a6b660307 --hub-addre
 
 ## Changelog
 
+**2026-09-02 — light-child creation is now capability-gated, not
+unconditional.** `ensure_light_child` previously created a light-child
+device for every fan unconditionally (minus the manual "No Physical
+Light" preference). Now does a live local status query first and skips
+creation if the fan's response positively omits DP 15 (light switch) —
+confirmed empirically that a genuinely no-light fan's Tuya schema omits
+this DP entirely, rather than reporting it false, so this is a reliable
+signal. Fails open (creates the child, prior behavior) on any query
+failure — only a successful query that positively reports no light skips
+creation. The "No Physical Light" preference still wins outright if set.
+Zero risk to any already-paired fan: this only ever runs before a fan's
+first light-child is created, which every already-known fan already has
+(or correctly doesn't).
+
 **2026-09-02 — the 2026-09-01 fix below is now confirmed fully live; a
 real, separate profile-tracking bug was found and fixed along the way.**
 The 09-01 profile bump never updated the driver's own hardcoded
