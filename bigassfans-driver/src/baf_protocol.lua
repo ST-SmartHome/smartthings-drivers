@@ -492,46 +492,71 @@ end
 --    a bare `{1: 1}`), consistent with a delete needing little more than
 --    a slot reference.
 --
--- **2026-09-02, confirmed live against the real fan via a standalone
--- Python harness (not this driver) — CRITICAL correction: this fan has
--- only ONE schedule slot, not a list.** A generic protobuf encoder was
--- built and verified byte-for-byte against the captured re-save frame
--- above (exact match) before touching real hardware. Test sequence: (1)
--- re-saved "My Schedule" unchanged — round-tripped byte-identical,
--- confirmed safe; (2) created a second, differently-named test schedule
--- ("ZZZ_TEST_DELETE_ME") expecting it to add alongside "My Schedule" --
--- **a follow-up query showed only the new schedule; "My Schedule" was
--- gone, not just hidden.** Confirmed with a multi-frame read (not a
--- pagination/single-frame-read artifact) that the fan holds exactly one
--- schedule at a time. **Immediately restored "My Schedule" using the
--- byte-verified re-save from finding (1) and confirmed it was fully
--- recovered** (same slot 3, all fields identical) — no lasting harm, but
--- a genuine near-miss. The captured pcap's own "create a new schedule
--- then delete it" sequence (slot 1 written, slot 2 deleted) makes much
--- more sense read this way too: it was never "create alongside, pick a
--- slot" — every write just overwrites whatever's there, and the fan's
--- own internal slot bookkeeping (1 vs 2 vs 3 seen across different
--- writes/reads) is not something a caller controls or should try to
--- predict; **the field-1 slot value in a write request looks like it
--- may not be meaningfully checked by the fan at all** (both saves in the
--- pcap used 1; this session's restore also used 1 and landed correctly
--- at whatever the real internal slot already was).
+-- **2026-09-02, standalone-harness testing — a false "single schedule
+-- slot" alarm, root-caused to a bug in the TEST SCRIPT, not the fan.**
+-- First test (re-saving "My Schedule" unchanged) round-tripped correctly
+-- and was genuinely safe. Second test (creating a second, differently-
+-- named schedule) then appeared to have REPLACED "My Schedule" outright
+-- -- a follow-up query seemed to show only the new schedule. Real cause,
+-- found once the user independently created their own second schedule
+-- via the official app and it showed up fine in the app's list: **the
+-- fan sends one SLIP frame PER schedule in response to a single
+-- SCHEDULES query**, and the test script's read function only consumed
+-- the FIRST frame before closing the connection -- it wasn't that "My
+-- Schedule" was gone, the probe just never read far enough to see it.
+-- Reading properly (loop until an idle timeout, not just one frame)
+-- immediately showed both schedules present and fully intact. **This
+-- fan supports multiple coexisting schedules** -- there was no actual
+-- data loss, but this was a real near-miss caused by trusting an
+-- under-tested harness against live hardware; the "restore" performed
+-- at the time was almost certainly a redundant no-op, not a genuine
+-- recovery. Lesson for reuse: when probing a query response on this
+-- protocol, always read to an idle timeout, never assume one frame is
+-- the whole answer, even for message types (like Query, not just the
+-- already-known MORE_PUSH commit acks) that hadn't previously shown
+-- multi-frame behavior.
 --
--- **Practical implication for any future feature**: this is not "add a
--- schedule," it's "replace the fan's one on-device schedule." A real
--- capability/handler needs to be built with that framing from the start
--- (e.g. an explicit single "Timer" binding, not a list), and any write
--- path must default to preserving the existing schedule's content
--- (read-modify-write) rather than ever constructing one from scratch,
--- to avoid silently destroying a real schedule a user already has
--- configured through the official app.
+-- **A third, richer `Schedule` shape found from the user's own real
+-- schedule** (a start/end time range with per-boundary fan+light
+-- actions, distinct from both the light-only and Bedtime/Wake-Up shapes
+-- above) -- raw decode only, most field meanings NOT independently
+-- confirmed, don't trust the specific numbers below without isolated
+-- testing:
+-- `{1: 1, 2: "Test schedule", 4: [1..7], 5: 1, 6: 1,
+--   7: {1: "22:00", 2: {1: 1}, 2: {4: 4}, 2: {5: 1}, 2: {6: 64}},
+--   8: {1: "08:00", 2: {1: 2}, 2: {11: 1}, 2: {12: 2300}, 2: {13: 4},
+--       2: {14: 3}, 2: {15: 1}}}`.
+-- Matches the app's own screen (Start 22:00: Speed 4, Light 64%; End
+-- 08:00: Fan Auto, no light action) well enough to guess at meaning --
+-- field 7's `4`=4 plausibly the commanded speed, `6`=64 plausibly the
+-- light percent; field 8's `12`=2300 plausibly an ideal-temp-style ×100
+-- value (23.00°C) for the Auto fan mode, `1`=1 vs `1`=2 plausibly an
+-- action-type discriminator (fixed-speed vs Auto) -- but none of this is
+-- isolated-tested, treat purely as a lead for a future capture, not
+-- documented behavior. **Important decode gotcha hit while reading this
+-- frame**: a short bytes field that happens to be a plain ASCII time
+-- string (e.g. "22:00", "08:00") can also happen to parse as a
+-- syntactically-valid nested tag+varint sequence by coincidence -- a
+-- naive decoder that always tries the nested-message interpretation
+-- first will silently misread it (e.g. "08:00"'s bytes were first
+-- misread as a nested `varint 56`). Always sanity-check a `bytes` field
+-- as a plain string FIRST when its length/content looks stringy, before
+-- trusting a recursive protobuf re-decode of it.
+--
+-- **Practical implication for any future feature, still true**: a write
+-- should still default to read-modify-write (fetch existing schedules,
+-- change only what's needed) rather than constructing one from scratch,
+-- since the exact rules for how many schedules the fan will hold and
+-- what happens on a genuine slot collision are still unconfirmed -- just
+-- not because of a hard one-slot limit, which doesn't exist.
 --
 -- **Not yet built as a real feature.** `build_commit` still has no
 -- encode support for a nested field-4 message at all (it only ever
 -- builds flat `{field_no = value}` property tables) — the standalone
--- harness above proves the wire format works, but real new encode
--- machinery is still needed in the driver itself, plus a capability +
--- command handler + profile placement + live 3-way verification, same
--- as every other feature in this file.
+-- harness above proves the wire format works for at least the two
+-- already-decoded shapes, but real new encode machinery is still needed
+-- in the driver itself, plus a capability + command handler + profile
+-- placement + live 3-way verification, same as every other feature in
+-- this file.
 
 return baf
