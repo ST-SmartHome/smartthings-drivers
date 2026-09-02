@@ -550,13 +550,229 @@ end
 -- what happens on a genuine slot collision are still unconfirmed -- just
 -- not because of a hard one-slot limit, which doesn't exist.
 --
--- **Not yet built as a real feature.** `build_commit` still has no
--- encode support for a nested field-4 message at all (it only ever
--- builds flat `{field_no = value}` property tables) — the standalone
--- harness above proves the wire format works for at least the two
--- already-decoded shapes, but real new encode machinery is still needed
--- in the driver itself, plus a capability + command handler + profile
--- placement + live 3-way verification, same as every other feature in
--- this file.
+-- **2026-09-02, SHIPPED — `scheduleEnabled` capability live, verified
+-- end-to-end.** The functions below are the real encode/decode
+-- machinery, ported from the standalone Python harness that proved the
+-- wire format, then refined once against real hardware (see
+-- walk_top_level_fields' header comment for a real substring-collision
+-- bug caught before it shipped). Deliberately does NOT attempt to fully
+-- understand every field of every Schedule shape (three found so far,
+-- likely more) -- baf.set_schedule_enabled operates on the RAW bytes a
+-- query returned and only ever touches field 6 (the enable flag),
+-- preserving every other byte including field order, which this fan's
+-- firmware has already been confirmed order-sensitive about elsewhere
+-- (see build_commit below). More conservative than parsing-then-re-
+-- serializing the whole message, which could reorder fields the fan
+-- might care about even if the semantic content were unchanged.
+--
+-- **A real bug found and fixed during the first live end-to-end test**:
+-- `BafClient.commit_schedule_and_verify` originally reused a schedule's
+-- own read-side "slot" (the outer wrap's field 1) as the write's slot
+-- argument too — the write silently had no effect. A QueryResult's slot
+-- field is NOT a stable per-schedule write target (both schedules on a
+-- real fan have been observed reporting the identical value
+-- simultaneously — more likely some kind of revision/generation
+-- counter) — **the write's slot argument must always be the fixed value
+-- `1`**, matching what the real official app used for every create/edit
+-- in the original pcap regardless of the schedule's own read-side slot.
+-- Verification correspondingly matches by schedule NAME, not slot
+-- number. Confirmed live: real `setScheduleEnabled` commands sent
+-- through the actual SmartThings API correctly toggled a real schedule
+-- off and on, independently re-verified via a direct probe outside
+-- SmartThings each time, with the household's real schedule ("My
+-- Schedule") confirmed completely untouched throughout every test.
+
+--- Serializes Root{2: Root2{2: Commit{4: {1: slot, 2: schedule_bytes}}}}.
+--- `schedule_bytes` is a raw, already-encoded Schedule message -- pass
+--- back exactly what a query returned (optionally patched via
+--- baf.patch_schedule_field below), never hand-construct one from
+--- scratch, per the read-modify-write safety rule established above.
+function baf.build_schedule_commit(slot, schedule_bytes)
+  local schedule_write = pb.encode_varint_field(1, slot) .. pb.encode_bytes_field(2, schedule_bytes)
+  local commit = pb.encode_bytes_field(4, schedule_write)
+  local root2 = pb.encode_bytes_field(2, commit)
+  return pb.encode_bytes_field(2, root2)
+end
+
+--- Parses one already-SLIP-decoded response frame from a SCHEDULES query
+--- into { slot = <int>, raw = <raw Schedule bytes>, fields = <parsed
+--- via pb.parse_fields> }, or nil if this frame isn't a schedules
+--- QueryResult (e.g. an echo of something else). The fan sends one frame
+--- PER schedule -- callers must read multiple frames to an idle timeout,
+--- never assume one frame is the whole answer (see BafClient.query_schedules
+--- and the "false single slot alarm" writeup above for exactly why this
+--- matters).
+function baf.parse_schedule_frame(payload)
+  local ok, top = pcall(pb.parse_fields, payload)
+  if not ok then
+    return nil
+  end
+  local root2_bytes = pb.last(top, 2)
+  if not root2_bytes then
+    return nil
+  end
+  local ok2, root2 = pcall(pb.parse_fields, root2_bytes)
+  if not ok2 then
+    return nil
+  end
+  local query_result_bytes = pb.last(root2, 4)
+  if not query_result_bytes then
+    return nil
+  end
+  local ok3, qr = pcall(pb.parse_fields, query_result_bytes)
+  if not ok3 then
+    return nil
+  end
+  local schedules_bytes = pb.last(qr, 3)
+  if not schedules_bytes then
+    return nil
+  end
+  local ok4, wrap = pcall(pb.parse_fields, schedules_bytes)
+  if not ok4 then
+    return nil
+  end
+  local slot = pb.last(wrap, 1)
+  local raw = pb.last(wrap, 2)
+  if not slot or not raw then
+    return nil
+  end
+  local ok5, fields = pcall(pb.parse_fields, raw)
+  if not ok5 then
+    fields = nil
+  end
+  return { slot = slot, raw = raw, fields = fields }
+end
+
+--- Walks `buf`'s TOP-LEVEL fields only (does NOT recurse into nested
+--- messages) and returns an ordered list of {field_no, wire_type,
+--- tag_start, value_end}, one entry per occurrence, in byte order.
+--- `tag_start` is the first byte of that occurrence's tag varint;
+--- `value_end` is one past its last byte (i.e. `buf:sub(tag_start,
+--- value_end - 1)` is that occurrence's complete encoded bytes).
+--- **This is what makes a targeted top-level field edit safe even when
+--- the exact same tag+value bytes also happen to appear elsewhere in
+--- the message (e.g. nested inside a sub-message)** — confirmed a real,
+--- live case of this 2026-09-02: field 5's top-level encoding (`{5:
+--- 1}`) also appears, coincidentally, inside one schedule's own
+--- action sub-structure, which a naive whole-buffer byte search cannot
+--- tell apart from the real top-level occurrence.
+local function walk_top_level_fields(buf)
+  local entries = {}
+  local i = 1
+  local len = #buf
+  while i <= len do
+    local tag_start = i
+    local tag, next_i = pb.decode_varint(buf, i)
+    local field_no = tag >> 3
+    local wire_type = tag & 0x7
+    i = next_i
+    if wire_type == 0 then
+      local _, ni = pb.decode_varint(buf, i)
+      i = ni
+    elseif wire_type == 2 then
+      local flen
+      flen, i = pb.decode_varint(buf, i)
+      i = i + flen
+    elseif wire_type == 1 then
+      i = i + 8
+    elseif wire_type == 5 then
+      i = i + 4
+    else
+      error("walk_top_level_fields: unsupported wire type " .. tostring(wire_type))
+    end
+    table.insert(entries, { field_no = field_no, wire_type = wire_type, tag_start = tag_start, value_end = i })
+  end
+  return entries
+end
+
+--- Returns a schedule's name (field 2), or nil if it doesn't have one --
+--- some Schedule shapes (the Bedtime/Wake-Up type found in the original
+--- pcap) have no name field at all.
+function baf.schedule_name(sched)
+  if not sched.fields then
+    return nil
+  end
+  return pb.last(sched.fields, 2)
+end
+
+--- Whether a schedule is enabled, per field 6's presence -- confirmed
+--- 2026-09-02 via live ON/OFF toggling on a real fan: present+1 =
+--- enabled, entirely absent = disabled, same missing-means-default
+--- convention as everywhere else in this protocol.
+function baf.schedule_enabled(sched)
+  if not sched.fields then
+    return nil
+  end
+  return pb.last(sched.fields, 6) ~= nil
+end
+
+--- Finds the first schedule in `schedules` (a list from
+--- BafClient.query_schedules) whose name (field 2) exactly matches
+--- `name`. Returns nil if not found -- callers must handle this
+--- gracefully, e.g. a configured name preference that doesn't match any
+--- real schedule on this specific fan (a schedule-less schedule, or one
+--- named differently, or a fan with none configured at all).
+function baf.find_schedule_by_name(schedules, name)
+  for _, sched in ipairs(schedules) do
+    if baf.schedule_name(sched) == name then
+      return sched
+    end
+  end
+  return nil
+end
+
+--- Returns a new raw Schedule message with field 6 (the enable flag)
+--- set to match `enabled`, or the same raw_bytes unchanged if it's
+--- already in that state (idempotent). Uses walk_top_level_fields above
+--- to find field 5's/field 6's real TOP-LEVEL occurrence, immune to the
+--- confirmed-real collision where a byte-identical tag+value also
+--- appears nested inside the schedule's own action sub-structure.
+--- Confirmed via direct byte-level observation across multiple real
+--- ON/OFF toggles that field 6, when present, sits immediately after
+--- field 5's top-level bytes and immediately before field 7's --
+--- inserts/removes exactly there rather than attempting a general
+--- re-serialize (this fan's firmware has already been confirmed
+--- order-sensitive for at least one other message type -- see
+--- build_commit below -- so never risk reordering fields this driver
+--- doesn't need to touch). Requires exactly one top-level field 5 with
+--- value 1 (true of every schedule shape seen so far) -- refuses rather
+--- than guessing if that's not the case.
+function baf.set_schedule_enabled(raw_bytes, enabled)
+  local ok, top_fields = pcall(walk_top_level_fields, raw_bytes)
+  if not ok then
+    return nil, "failed to walk top-level fields: " .. tostring(top_fields)
+  end
+
+  local field5, field6
+  for _, entry in ipairs(top_fields) do
+    if entry.field_no == 5 and entry.wire_type == 0 then
+      if field5 then
+        return nil, "more than one top-level field 5 -- refusing to guess"
+      end
+      field5 = entry
+    elseif entry.field_no == 6 and entry.wire_type == 0 then
+      if field6 then
+        return nil, "more than one top-level field 6 -- refusing to guess"
+      end
+      field6 = entry
+    end
+  end
+
+  local currently_enabled = field6 ~= nil
+  if enabled == currently_enabled then
+    return raw_bytes
+  end
+
+  if enabled then
+    if not field5 then
+      return nil, "no top-level field 5 found -- can't determine where to insert field 6"
+    end
+    local field6_bytes = pb.encode_varint_field(6, 1)
+    return raw_bytes:sub(1, field5.value_end - 1) .. field6_bytes .. raw_bytes:sub(field5.value_end)
+  else
+    -- field6 ~= nil here (currently_enabled was true, enabled is false)
+    return raw_bytes:sub(1, field6.tag_start - 1) .. raw_bytes:sub(field6.value_end)
+  end
+end
 
 return baf
