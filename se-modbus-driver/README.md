@@ -2,103 +2,86 @@
 
 LAN Edge Driver for a SolarEdge inverter, controlling it over local Modbus
 TCP (SunSpec) rather than through SolarEdge's cloud API — no cloud
-dependency once set up.
+dependency once set up. Distributed via a SmartThings channel invite
+(see the Community thread below).
 
-**Discovery**: SolarEdge's Modbus TCP service is a passive server with no
-broadcast/SSDP announcement of its own, so this driver doesn't gate
-discovery on any network signal — `discovery.lua` creates exactly one
-device unconditionally whenever discovery runs (i.e. whenever "Scan
-Nearby" is triggered), with a placeholder network ID. The real IP/port/
-unit ID are then entered by hand as device **preferences** after the
-device is created — see `profiles/solaredge-inverter.yml`. `init.lua`'s
-`infoChanged` handler picks up preference changes and (re)starts polling
-against the configured address.
+**Discovery**: the inverter's Modbus TCP service is passive with no
+broadcast/SSDP of its own, so discovery doesn't gate on any network
+signal — `discovery.lua` creates one device unconditionally on "Scan
+Nearby", with a placeholder network ID. Real IP/port/unit ID are then
+entered as device **preferences** afterward (see
+`profiles/solaredge-inverter.yml`); `init.lua`'s `infoChanged` picks up
+preference changes and (re)starts polling.
 
 ## Grid import/export meter
 
-If your installation has a SolarEdge production/consumption meter attached
-(SunSpec model 201–204 — many residential installs do), the driver reads
-it automatically alongside the inverter, in the same Modbus session, and
-exposes it as a second `grid` component:
+If your installation has a SolarEdge production/consumption meter
+(SunSpec model 201–204), the driver reads it automatically in the same
+Modbus session and exposes a second `grid` component:
 
-- **`powerMeter`** — net grid power, **signed**: negative = importing
-  from the grid, positive = exporting surplus. This already nets out
-  household consumption, so it's the right value to use for a "don't run
-  this unless there's solar surplus" style condition — don't use the
-  inverter's own production figure for that, it doesn't account for what
-  the house itself is drawing.
-- **`gridEnergy`** (custom capability) — lifetime
-  exported/imported energy.
+- **`powerMeter`** — net grid power, **signed** (negative = importing,
+  positive = exporting). Already nets out household consumption, so use
+  this (not the inverter's own production figure) for a "only run if
+  there's solar surplus" condition.
+- **`gridEnergy`** (custom capability) — lifetime exported/imported
+  energy.
 
-No meter present is a normal, fully-supported case — the driver detects
-this at read time and simply omits the `grid` component's readings
-rather than erroring. The `grid` component shows up as its own
-selectable condition in SmartThings Routines, confirmed via the app.
+No meter present is a normal case — readings are simply omitted, not
+errored. `grid` shows up as its own selectable condition in Routines.
 
 ## Files
 
 - `config.yml` — driver metadata, `lan` + `discovery` permissions.
-- `profiles/solaredge-inverter.yml` — capabilities (powerMeter, energyMeter,
-  temperatureMeasurement, refresh) and the IP/port/unitId/pollInterval
-  preferences. The `grid` and `dc` components (see above) are declared
-  here too.
+- `profiles/solaredge-inverter.yml` — capabilities (powerMeter,
+  energyMeter, temperatureMeasurement, refresh, plus `grid`/`dc`) and the
+  IP/port/unitId/pollInterval preferences.
 - `src/discovery.lua` — unconditional single-device creation.
 - `src/init.lua` — lifecycle handlers, preference-driven polling loop.
-- `src/modbus.lua` — minimal Modbus TCP client (Read Holding Registers only,
-  function code 0x03). Hand-rolled, since the Edge Driver Lua sandbox has no
-  Modbus library — uses `cosock.socket` for the raw TCP connection.
+- `src/modbus.lua` — minimal Modbus TCP client (Read Holding Registers,
+  function code 0x03), hand-rolled since the Lua sandbox has no Modbus
+  library — uses `cosock.socket` directly.
 - `src/solaredge.lua` — SunSpec inverter model (101/103) register map and
-  scale-factor math, plus the optional meter model (201–204) read for the
-  grid import/export figures above.
+  scale-factor math, plus the optional meter model (201–204) read.
 
-## Status: working, verified live (2026-08-03)
+## Status: working, verified live
 
-Confirmed via live `logcat` against the real inverter (SE5000AU) — power,
-lifetime energy, DC voltage/power, temperature, and status all reporting
-sane, stable values across multiple poll cycles, and visible in the
-SmartThings app. Example log line shape (values illustrative, not a real
-reading):
+Confirmed via live `logcat` against a real SE5000AU — power, lifetime
+energy, DC voltage/power, temperature, and status all reporting sane,
+stable values, visible in the app. Example log shape (illustrative):
 
 ```
 SolarEdge reading: <W>W, <Wh> lifetime, <V> DC, <W> DC, <°C>, status=MPPT
 ```
 
-Deployed as `se-modbus-v4`. Device preferences take an IP:port
-(sentinel `192.168.1.100:1502` — real LAN IP set per-install), Modbus
-unit ID (typically `1`), and poll interval (30s by default).
+Device preferences take an IP:port (sentinel `192.168.1.100:1502` — real
+LAN IP set per-install), Modbus unit ID (typically `1`), and poll
+interval (30s default).
 
-### What shows up in the SmartThings app
+### What shows up in the app
 
 | Component | Capability | Shows |
 |---|---|---|
 | `main` | `powerMeter` | Live inverter output power (W) |
 | `main` | `energyMeter` | Lifetime energy produced (kWh) |
 | `main` | `temperatureMeasurement` | Inverter temperature (°C) |
-| `main` | `inverterStatus` | Operating status (MPPT/THROTTLED/FAULT/etc — see below) |
+| `main` | `inverterStatus` | Operating status (MPPT/THROTTLED/FAULT/etc) |
 | `main` | `refresh` | Manual refresh button |
-| `grid` | `powerMeter` | Net grid power, signed — see "Grid import/export meter" above |
+| `grid` | `powerMeter` | Net grid power, signed |
 | `grid` | `gridEnergy` | Lifetime exported/imported energy (kWh) |
-| `dc` | `voltageMeasurement` | DC voltage straight off the solar panels, before inversion |
-| `dc` | `powerMeter` | DC power straight off the solar panels, before inversion |
+| `dc` | `voltageMeasurement` | DC voltage before inversion |
+| `dc` | `powerMeter` | DC power before inversion |
 
-## Inverter operating status
-
-`I_Status` (OFF/SLEEPING/STARTING/MPPT/THROTTLED/SHUTTING_DOWN/FAULT/
-STANDBY) is exposed as a custom capability, `inverterStatus` — no
-standard SmartThings capability fits inverter
-operating state, so it's a free-text status attribute visible in the app,
-not just in logs.
+`inverterStatus` (OFF/SLEEPING/STARTING/MPPT/THROTTLED/SHUTTING_DOWN/
+FAULT/STANDBY) is a custom capability — no standard SmartThings
+capability fits inverter operating state.
 
 ## Known limitation: one Modbus connection at a time
 
-SolarEdge inverters only accept a single Modbus TCP connection at once —
-this is a hardware/firmware constraint of the inverter itself, not
-something this driver (or any driver) can work around. If anything else
-polls this inverter's Modbus TCP service at the same time (Home
-Assistant, another SmartThings driver instance, SolarEdge's own local
-tools), connection attempts will collide. Well-documented elsewhere too,
-e.g. the [solaredge-modbus-multi wiki](https://github.com/WillCodeForCats/solaredge-modbus-multi/wiki/Known-Issues).
-Only run one Modbus TCP integration against a given inverter at a time.
+SolarEdge inverters only accept a single Modbus TCP connection — a
+hardware/firmware constraint, not something any driver can work around.
+Anything else polling the same inverter (Home Assistant, another driver
+instance, SolarEdge's own tools) will collide with this one. Also
+documented in the [solaredge-modbus-multi wiki](https://github.com/WillCodeForCats/solaredge-modbus-multi/wiki/Known-Issues).
 
 ## SmartThings Community
 
