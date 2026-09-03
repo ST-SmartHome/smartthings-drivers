@@ -1,4 +1,4 @@
-name: bigassfans-h.v7
+name: bigassfans-h.v8
 components:
   - id: main
     label: "Fan"
@@ -21,8 +21,6 @@ components:
         version: 1
       - id: examplens.ecoMode
         version: 1
-      - id: examplens.sleepMode
-        version: 1
     categories:
       - name: Fan
   - id: light
@@ -40,7 +38,7 @@ components:
       - id: examplens.addAnotherFan
         version: 1
   - id: settings
-    label: "Settings"
+    label: "Device Settings"
     capabilities:
       - id: examplens.ledIndicators
         version: 1
@@ -53,6 +51,8 @@ components:
   - id: sleep
     label: "Sleep"
     capabilities:
+      - id: examplens.sleepMode
+        version: 1
       - id: examplens.wakeUpMotionTimeout
         version: 1
       - id: examplens.sleepAutoMode

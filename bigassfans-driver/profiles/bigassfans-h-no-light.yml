@@ -1,16 +1,15 @@
-name: bigassfans-h-no-light.v7
+name: bigassfans-h-no-light.v9
+metadata:
+  mnmn: SmartThingsCommunity
+  vid: a1b2c3d4-0000-3000-8000-000000000001
 components:
   - id: main
-    label: "Fan"
+    label: "Fan+Light"
     capabilities:
       - id: switch
         version: 1
       - id: fanSpeed
         version: 1
-        config:
-          values:
-            - key: "fanSpeed.value"
-              range: [0, 7]
       - id: refresh
         version: 1
       - id: examplens.fanMode
@@ -21,8 +20,6 @@ components:
         version: 1
       - id: examplens.ecoMode
         version: 1
-      - id: examplens.sleepMode
-        version: 1
     categories:
       - name: Fan
   - id: management
@@ -31,8 +28,10 @@ components:
       - id: examplens.addAnotherFan
         version: 1
   - id: settings
-    label: "Settings"
+    label: "Device Settings"
     capabilities:
+      - id: examplens.showSettings
+        version: 1
       - id: examplens.ledIndicators
         version: 1
       - id: examplens.fanBeep
@@ -44,13 +43,21 @@ components:
   - id: sleep
     label: "Sleep"
     capabilities:
+      - id: examplens.sleepMode
+        version: 1
       - id: examplens.wakeUpMotionTimeout
         version: 1
       - id: examplens.sleepAutoMode
         version: 1
+      - id: examplens.sleepAutoModeGate
+        version: 1
+      - id: examplens.sleepSpeed
+        version: 1
       - id: examplens.sleepIdealTemperature
         version: 1
       - id: examplens.sleepTimer
+        version: 1
+      - id: examplens.sleepTimerEndSpeed
         version: 1
       - id: examplens.sleepTimerDuration
         version: 1
@@ -60,7 +67,13 @@ components:
         version: 1
       - id: examplens.sleepBrightnessMode
         version: 1
+      - id: examplens.sleepBrightnessModeGate
+        version: 1
+      - id: examplens.sleepBrightnessPercent
+        version: 1
       - id: examplens.wakeUpMode
+        version: 1
+      - id: examplens.wakeUpModeGate
         version: 1
       - id: examplens.wakeUpBrightness
         version: 1

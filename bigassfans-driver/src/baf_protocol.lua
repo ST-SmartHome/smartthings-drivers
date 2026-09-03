@@ -99,7 +99,7 @@ baf.FIELDS = {
   -- upstream aiobafi6 proto verbatim and no such field exists. The real
   -- `Capabilities` submessage (SENSORS category, field 17) only names 4
   -- sub-fields: has_comfort1=1, has_comfort3=3, has_light=4, has_uplight=6.
-  -- Live-queried on a real fan: true sub-fields are {1,3,4,7,9,10,14}
+  -- Live-queried on one of the two test fans: true sub-fields are {1,3,4,7,9,10,14}
   -- -- has_comfort1/has_comfort3/has_light all true (comfort-related
   -- capability flags being true is independent corroboration that the
   -- still-unconfirmed Comfort-screen fields elsewhere in this table are
@@ -250,7 +250,7 @@ baf.FIELDS = {
   -- 2026-09-01 -- full category sweep (ALL/FAN/LIGHT/
   -- FIRMWARE_MORE_DATETIME_API/NETWORK/SCHEDULES/SENSORS all queried,
   -- every field number found recorded), not from a pcap this time --
-  -- direct live queries against a real fan. All NOT YET CONFIRMED --
+  -- direct live queries against one of the two test fans. All NOT YET CONFIRMED --
   -- no isolated-change testing done, just noting what a snapshot returns.
   -- fan_target_rpm(63) is notable: identical value to current_rpm(64) in
   -- the same query, worth checking whether it tracks a commanded setpoint
@@ -719,6 +719,30 @@ function baf.find_schedule_by_name(schedules, name)
     end
   end
   return nil
+end
+
+--- Returns only the schedules in `schedules` that have a name (field 2),
+--- sorted alphabetically by that name. Used to bind a stable "slot N"
+--- position across independent polls/commands to the same physical
+--- schedule -- the fan's own read-side "slot" field is a revision
+--- counter, not an identity (see the "real bug found and fixed" note
+--- above), and nameless schedules (the Bedtime/Wake-Up shape) have no
+--- key to sort or match on at all, so they're excluded here rather than
+--- risking an unstable position. Two schedules that happen to share the
+--- exact same name are a known, accepted edge case (whichever byte-order
+--- baf.parse_schedule_frame's caller happened to see them in wins the
+--- tie) -- not expected in practice, not specially handled.
+function baf.sorted_named_schedules(schedules)
+  local named = {}
+  for _, sched in ipairs(schedules) do
+    if baf.schedule_name(sched) ~= nil then
+      table.insert(named, sched)
+    end
+  end
+  table.sort(named, function(a, b)
+    return baf.schedule_name(a) < baf.schedule_name(b)
+  end)
+  return named
 end
 
 --- Returns a new raw Schedule message with field 6 (the enable flag)
