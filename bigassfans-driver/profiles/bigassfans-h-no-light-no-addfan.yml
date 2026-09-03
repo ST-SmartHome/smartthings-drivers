@@ -1,4 +1,4 @@
-name: bigassfans-h-no-light-no-addfan.v28
+name: bigassfans-h-no-light-no-addfan.v35
 metadata:
   mnmn: SmartThingsCommunity
   vid: 19868d98-4e73-352a-889d-3ce2be8f2def
@@ -79,7 +79,23 @@ components:
     capabilities:
       - id: examplens.showSchedule
         version: 1
+      - id: examplens.scheduleOneExists
+        version: 1
+      - id: examplens.firstScheduleLabel
+        version: 1
       - id: examplens.scheduleEnabled
+        version: 1
+      - id: examplens.scheduleTwoExists
+        version: 1
+      - id: examplens.secondScheduleLabel
+        version: 1
+      - id: examplens.secondScheduleEnabled
+        version: 1
+      - id: examplens.scheduleThreeExists
+        version: 1
+      - id: examplens.thirdScheduleLabel
+        version: 1
+      - id: examplens.thirdScheduleEnabled
         version: 1
 preferences:
   - title: "Manual IP Override"
@@ -115,13 +131,3 @@ preferences:
     preferenceType: boolean
     definition:
       default: true
-  - title: "Schedule Name"
-    name: scheduleName
-    description: "Exact name of the on-device schedule (as named in the official BAF app) that Schedule Enabled controls — must match exactly. TESTING: defaults to a disposable test schedule, not your real one."
-    required: true
-    preferenceType: string
-    definition:
-      stringType: text
-      minLength: 1
-      maxLength: 64
-      default: "Test schedule"

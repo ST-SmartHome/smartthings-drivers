@@ -76,22 +76,79 @@ local WAKE_UP_MODE_GATE_CAP = capabilities["examplens.wakeUpModeGate"]
 local WAKE_UP_BRIGHTNESS_GATE_CAP = capabilities["examplens.wakeUpBrightnessGate"]
 local WAKE_UP_BRIGHTNESS_CAP = capabilities["examplens.wakeUpBrightness"]
 
--- Schedule (2026-09-02): binds SmartThings to the fan's own on-device
--- schedule, decoded via baf.build_schedule_commit/parse_schedule_frame/
--- set_schedule_enabled (see baf_protocol.lua's "Schedule write path"
--- comment for the full protocol writeup and the near-miss that shaped
--- this design). Deliberately scoped to ONE schedule, chosen by exact
--- name match against the scheduleName preference -- never constructs a
--- schedule from scratch, always reads the real one first and patches
--- only the one field being changed (read-modify-write), since the exact
--- rules for how many schedules a fan will hold and what a write
--- collision does are still not fully understood. showSchedule is the
--- same phantom-switch pattern as showSettings (pure local UI state, no
--- protocol commit) -- its own section, per explicit user design
--- direction, not folded into an existing component.
+-- Schedule (2026-09-02, reworked 2026-09-03): binds SmartThings to the
+-- fan's own on-device schedules, decoded via baf.build_schedule_commit/
+-- parse_schedule_frame/set_schedule_enabled (see baf_protocol.lua's
+-- "Schedule write path" comment for the full protocol writeup and the
+-- near-miss that shaped this design). Never constructs a schedule from
+-- scratch, always reads the real one first and patches only the one
+-- field being changed (read-modify-write), since the exact rules for how
+-- many schedules a fan will hold and what a write collision does are
+-- still not fully understood. showSchedule is the same phantom-switch
+-- pattern as showSettings (pure local UI state, no protocol commit) --
+-- its own section, per explicit user design direction, not folded into
+-- an existing component.
+--
+-- **Reworked 2026-09-03 from name-preference binding to real
+-- auto-discovery**, per direct user pushback on the first version
+-- ("rather than querying the schedule name, pull the whole schedule
+-- config out") -- typing an exact name into a preference was clunky,
+-- silently broke if a schedule got renamed in the official app, and gave
+-- no visibility into what schedules actually exist. Now: every poll
+-- queries all schedules, keeps only the ones that HAVE a name (the
+-- Bedtime/Wake-Up shape has none -- see baf_protocol.lua, out of scope
+-- here), and sorts them alphabetically by name. That sort order is what
+-- makes "slot N" mean the same physical schedule poll to poll -- the
+-- fan's own read-side "slot" field is confirmed to be a revision
+-- counter, not a stable identity (see baf_protocol.lua), so it can't be
+-- used directly. Each slot shows a read-only label (the real name, or
+-- "(none)" if fewer than 3 named schedules exist) plus its own
+-- enable/disable toggle; the toggle's handler re-runs the exact same
+-- query+filter+sort at COMMAND time rather than trusting a stale
+-- position, so it always targets whatever is currently in that slot --
+-- consistent with whatever the last poll displayed. No preference gates
+-- this anymore (per explicit user direction: "my fans schedules arent
+-- production ready at the moment anyway") -- Show Schedule remains the
+-- only visibility gate, same as before.
 local SHOW_SCHEDULE_CAP = capabilities["examplens.showSchedule"]
+local SCHEDULE_ONE_EXISTS_CAP = capabilities["examplens.scheduleOneExists"]
+local SCHEDULE_TWO_EXISTS_CAP = capabilities["examplens.scheduleTwoExists"]
+local SCHEDULE_THREE_EXISTS_CAP = capabilities["examplens.scheduleThreeExists"]
+local FIRST_SCHEDULE_LABEL_CAP = capabilities["examplens.firstScheduleLabel"]
+local SECOND_SCHEDULE_LABEL_CAP = capabilities["examplens.secondScheduleLabel"]
+local THIRD_SCHEDULE_LABEL_CAP = capabilities["examplens.thirdScheduleLabel"]
 local SCHEDULE_ENABLED_CAP = capabilities["examplens.scheduleEnabled"]
+local SECOND_SCHEDULE_ENABLED_CAP = capabilities["examplens.secondScheduleEnabled"]
+local THIRD_SCHEDULE_ENABLED_CAP = capabilities["examplens.thirdScheduleEnabled"]
 local WAKE_UP_MOTION_TIMEOUT_CAP = capabilities["examplens.wakeUpMotionTimeout"]
+
+--- Auto-discovered schedule slots (Phase 1 of SCHEDULE_FEATURE_PLAN.md,
+--- reworked 2026-09-03) -- `index` is this slot's 1-based position in
+--- the alphabetically-sorted list of the fan's NAMED schedules, computed
+--- fresh every time (see baf.sorted_named_schedules below), never
+--- persisted.
+--- `exists_cap`/`exists_attr` (added 2026-09-03, per explicit user
+--- request "don't show the blank last schedule if it can't be edited or
+--- created") are headless gate capabilities, same pattern as
+--- sleepAutoModeGate elsewhere in this file: folds TWO conditions into
+--- one EQUALS-able value -- "On" only when Show Schedule is on AND a
+--- named schedule actually exists at this position, "Off" otherwise
+--- (fail-closed, unlike the fail-open sleep gates, since there's nothing
+--- useful to show for a slot with no schedule). The device-config's
+--- visibleCondition for each slot's label+enabled tiles reads THIS gate,
+--- not showSchedule directly -- visibleCondition only supports one
+--- condition per entry, so folding is the only way to require both.
+local SCHEDULE_SLOTS = {
+  { index = 1, exists_cap = SCHEDULE_ONE_EXISTS_CAP, exists_attr = "scheduleOneExists",
+    label_cap = FIRST_SCHEDULE_LABEL_CAP, label_attr = "firstScheduleLabel",
+    cap = SCHEDULE_ENABLED_CAP, attr = "scheduleEnabled", command_name = "setScheduleEnabled" },
+  { index = 2, exists_cap = SCHEDULE_TWO_EXISTS_CAP, exists_attr = "scheduleTwoExists",
+    label_cap = SECOND_SCHEDULE_LABEL_CAP, label_attr = "secondScheduleLabel",
+    cap = SECOND_SCHEDULE_ENABLED_CAP, attr = "secondScheduleEnabled", command_name = "setSecondScheduleEnabled" },
+  { index = 3, exists_cap = SCHEDULE_THREE_EXISTS_CAP, exists_attr = "scheduleThreeExists",
+    label_cap = THIRD_SCHEDULE_LABEL_CAP, label_attr = "thirdScheduleLabel",
+    cap = THIRD_SCHEDULE_ENABLED_CAP, attr = "thirdScheduleEnabled", command_name = "setThirdScheduleEnabled" },
+}
 
 local OFF_ON_AUTO_TO_STRING = { [0] = "Off", [1] = "On", [2] = "Auto" }
 local STRING_TO_OFF_ON_AUTO = { Off = 0, On = 1, Auto = 2 }
@@ -318,18 +375,27 @@ local function apply_sleep_status(device, fan, light)
   end
 end
 
---- Queries schedules and emits scheduleEnabled for whichever one matches
---- the scheduleName preference by exact name. Deliberately its OWN
---- connection (BafClient.query_schedules), not folded into the regular
---- FAN/LIGHT/SENSORS poll_once cycle -- schedule content changes rarely
---- (only via this capability or the official app), so paying for an
---- extra TCP connection every single poll cycle isn't worth it on this
---- fan's known-lossy Wi-Fi; called instead from device_init, the
---- refresh command, and right after this driver's own writes. Silently
---- leaves the attribute at whatever it last was if the query fails or no
---- schedule matches the configured name (logged, not surfaced as an
---- error state) -- an unfound schedule is a configuration mismatch to
---- notice via the log, not something to guess an answer for.
+--- Queries all schedules and emits the label, enabled state, AND
+--- existence gate for each of SCHEDULE_SLOTS' 3 auto-discovered
+--- positions. Deliberately its OWN connection (BafClient.query_schedules),
+--- not folded into the regular FAN/LIGHT/SENSORS poll_once cycle --
+--- schedule content changes rarely (only via SmartThings or the official
+--- app), so paying for an extra TCP connection every single poll cycle
+--- isn't worth it on this fan's known-lossy Wi-Fi; called instead from
+--- device_init, the refresh command, right after this driver's own
+--- schedule writes, AND now also from every Show Schedule toggle (so the
+--- exists-gates update immediately, not just on the next poll).
+--- **Reworked 2026-09-03 from preference-bound names to auto-discovery**
+--- (see the header comment above SCHEDULE_SLOTS for why) -- every named
+--- schedule found is sorted alphabetically (baf.sorted_named_schedules)
+--- and assigned to slots 1/2/3 in that order; a slot beyond however many
+--- named schedules actually exist still gets its label set to "(none)"
+--- (harmless, since the tile itself is hidden) but its exists-gate goes
+--- "Off", hiding the whole label+enabled pair per explicit user request
+--- ("don't show the blank last schedule if it can't be edited or
+--- created") -- see the exists_cap/exists_attr comment above
+--- SCHEDULE_SLOTS for why this needs its own gate rather than reusing
+--- showSchedule's visibleCondition directly.
 local function apply_schedule_status(driver, device)
   local schedule_component = device.profile.components.schedule
   if not schedule_component then
@@ -339,26 +405,32 @@ local function apply_schedule_status(driver, device)
   if not ip then
     return
   end
-  local name = device.preferences and device.preferences.scheduleName
-  if not name or name == "" then
-    return
-  end
+  local show_schedule = device:get_latest_state("schedule", "examplens.showSchedule", "showSchedule")
   local schedules, err = BafClient.query_schedules(ip, 5)
   if not schedules then
     log.warn("BAF schedule status query failed: " .. tostring(err))
     return
   end
-  local sched = baf.find_schedule_by_name(schedules, name)
-  if not sched then
-    log.warn("BAF no schedule named '" .. name .. "' found (" .. #schedules .. " schedule(s) present)")
-    return
+  local named = baf.sorted_named_schedules(schedules)
+  for _, slot in ipairs(SCHEDULE_SLOTS) do
+    local sched = named[slot.index]
+    device:emit_component_event(schedule_component,
+      slot.label_cap[slot.label_attr]({ value = sched and baf.schedule_name(sched) or "(none)" }))
+    -- Always emit the enabled attribute, even when no schedule exists at
+    -- this slot -- an attribute that's NEVER been emitted shows as a raw
+    -- `null` with no timestamp in devices:status, which is exactly what
+    -- triggers the app's "hasn't updated all of its status information
+    -- yet" toast, and it recurs every time the section is opened since a
+    -- never-populated value never self-heals. Matches the label's
+    -- always-emit pattern above (which already uses "(none)" as its own
+    -- absent-value default) instead of silently skipping like before.
+    local enabled = sched and baf.schedule_enabled(sched)
+    device:emit_component_event(schedule_component,
+      slot.cap[slot.attr]({ value = enabled and "On" or "Off" }))
+    local exists = (show_schedule == "On") and (sched ~= nil)
+    device:emit_component_event(schedule_component,
+      slot.exists_cap[slot.exists_attr]({ value = exists and "On" or "Off" }))
   end
-  local enabled = baf.schedule_enabled(sched)
-  if enabled == nil then
-    return
-  end
-  device:emit_component_event(schedule_component,
-    SCHEDULE_ENABLED_CAP.scheduleEnabled({ value = enabled and "On" or "Off" }))
 end
 
 --- Handles three cases uniformly: (1) a light-child device — emits
@@ -415,8 +487,8 @@ local function poll_once(driver, device)
     -- same connection, no extra TCP overhead.
     --
     -- One immediate retry on failure: found 2026-08-22 that on a
-    -- sufficiently lossy Wi-Fi network (this household's "Sengled" SSID
-    -- runs ~40% TX retry rates on both fans, unrelated to this driver)
+    -- sufficiently lossy Wi-Fi network (a congested 2.4GHz SSID with a
+    -- high TX-retry rate on both fans, unrelated to this driver)
     -- poll_once fails with "read failed waiting for start delimiter:
     -- timeout" on roughly 1-in-5 cycles per fan — a lost/delayed response,
     -- not a slow one, so a longer timeout wouldn't help; a fresh attempt
@@ -489,7 +561,7 @@ local REFRESH_DELAY_SECONDS = 2
 
 -- How many times to (re)send a commit if it doesn't verify as applied.
 -- Mirrors the read-path retry added 2026-08-22 for the same reason: this
--- fan's Wi-Fi runs ~40% TX retry rates, and BafClient.commit's local
+-- fan's Wi-Fi has a high TX-retry rate, and BafClient.commit's local
 -- sock:send() succeeding only proves the write left this box, not that it
 -- reached the fan. Unlike reads, a lost commit produced no error and no
 -- retry at all before this fix — the app's toggle would just spin and
@@ -724,7 +796,7 @@ end
 local WITH_ADDFAN_PROFILE = "bigassfans-h.v8"
 local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v8"
 local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v9"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v28"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v35"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
 -- All four reset to nil after the 2026-08-27 v2->v3 bump above (a new
@@ -892,12 +964,13 @@ local function device_init(driver, device)
       SHOW_SETTINGS_CAP.showSettings({ value = "On" }))
   end
   -- Same seed pattern as showSettings above -- pure local UI state, safe
-  -- to default immediately.
+  -- to default immediately. Real value "On" (see show_schedule_on's
+  -- comment for the 2026-09-03 On/Off correction).
   local schedule_component = device.profile.components.schedule
   if schedule_component and
       device:get_latest_state("schedule", "examplens.showSchedule", "showSchedule") == nil then
     device:emit_component_event(schedule_component,
-      SHOW_SCHEDULE_CAP.showSchedule({ value = "Show" }))
+      SHOW_SCHEDULE_CAP.showSchedule({ value = "On" }))
   end
   -- Real, network-dependent status -- wrapped in pcall like poll_once,
   -- for the same reason: an uncaught error here must never stop
@@ -1010,7 +1083,7 @@ end
 
 -- CORRECTED 2026-08-25: the "never takes effect" conclusion that removed
 -- this handler was wrong — reverse_enable does get committed, just with
--- an unpredictable delay (confirmed when a real fan turned up
+-- an unpredictable delay (confirmed when one of the two test fans turned up
 -- running reverse_enable=true, well after the original short wait-then-
 -- verify test looked like it failed; see project-status memory for the
 -- full writeup and the incident that caught it). Handler restored.
@@ -1023,7 +1096,7 @@ end
 --
 -- 2026-08-25: added a stop-the-fan-first interlock, since this original
 -- code committed reverse_enable directly regardless of whether the fan
--- was spinning -- the exact sequence that likely put the fan
+-- was spinning -- the exact sequence that likely put one of the two test fans
 -- into reverse at full speed in the first place, and was worked around
 -- manually (stop, verify stopped, then flip) via the standalone fix
 -- script when that incident was caught. That manual sequence is now
@@ -1157,61 +1230,134 @@ end
 
 --- showSchedule: same phantom-switch pattern as showSettings above --
 --- pure local UI state, no protocol commit, safe to default immediately
---- (see device_init's seed call).
+--- (see device_init's seed call). Real value is "On"/"Off", not the
+--- original "Show"/"Hide" directly ("Show"/"Hide" now only exist as this
+--- tile's on/off LABEL text in its presentation).
+---
+--- RESOLVED 2026-09-03 -- real root cause found: this driver has zero
+--- confirmed-working displayType:switch tiles at all (the LED/beep/IR
+--- switch-flip saga's own conclusion was that the switch renderer's knob
+--- "may never have actually tracked state"), while scheduleEnabled right
+--- next to this one, list-style, has always rendered correctly. And
+--- critically: a capability's *rendering* (displayType/switch/list) is
+--- controlled entirely by its own `/capabilities/{id}/{version}/
+--- presentation` sub-resource, NOT by anything in the device-config's
+--- detailView entries -- every prior device-config edit attempting to
+--- fix this tile's rendering was structurally inert; the platform
+--- silently drops unrecognized display keys from a device-config submit
+--- and only ever stores {component, capability, version, visibleCondition}
+--- there. Real fix: PUT a list-style presentation directly onto the
+--- showSchedule capability (matching scheduleEnabled's shape, key
+--- Off/On -> display label Hide/Show), then bake a FRESH device-config
+--- vid off of it (device-config presentations are frozen at creation
+--- time from whatever the referenced capabilities' presentations were at
+--- that moment -- an existing vid does not re-resolve on a later
+--- capability-presentation change, and the platform's content-hash dedup
+--- will silently hand back a stale vid for byte-identical resubmits, so
+--- forcing a genuinely new one needs an actual structural diff
+--- somewhere harmless, not just a capability-presentation change alone).
+--- Re-runs apply_schedule_status right after a Show Schedule toggle so
+--- the per-slot exists-gates (and thus each slot's own visibility)
+--- update immediately rather than waiting for the next poll -- added
+--- 2026-09-03 alongside the exists-gate feature itself. Wrapped in
+--- pcall, same discipline as every other apply_schedule_status call
+--- site, since it opens a real network connection to the fan.
+local function refresh_schedule_exists_gates(driver, device)
+  local ok, err = pcall(apply_schedule_status, driver, device)
+  if not ok then
+    log.error("BAF apply_schedule_status crashed after a Show Schedule toggle: " .. tostring(err))
+  end
+end
+
 local function show_schedule_on(driver, device, command)
   device:emit_component_event(device.profile.components.schedule,
-    SHOW_SCHEDULE_CAP.showSchedule({ value = "Show" }))
+    SHOW_SCHEDULE_CAP.showSchedule({ value = "On" }))
+  refresh_schedule_exists_gates(driver, device)
 end
 
 local function show_schedule_off(driver, device, command)
   device:emit_component_event(device.profile.components.schedule,
-    SHOW_SCHEDULE_CAP.showSchedule({ value = "Hide" }))
+    SHOW_SCHEDULE_CAP.showSchedule({ value = "Off" }))
+  refresh_schedule_exists_gates(driver, device)
 end
 
---- Real read-modify-write: queries the current schedules, finds the one
---- matching scheduleName exactly, patches ONLY the enable flag via
---- baf.set_schedule_enabled (never reconstructs a schedule from
---- scratch), writes it back, and verifies via BafClient.
---- commit_schedule_and_verify. Every failure mode (no IP yet, query
---- failed, schedule not found, patch refused, write not verified) is
---- logged and returns without emitting a new (possibly wrong) status --
---- apply_schedule_status will pick up whatever the fan's real state
---- actually is on the next refresh/init rather than this handler ever
---- guessing.
-local function set_schedule_enabled(driver, device, command)
+--- 2026-09-03: root cause of the toggle-knob bug turned out to be much
+--- simpler than any of the above -- the presentation was never actually
+--- switched from displayType:switch to displayType:list (only the
+--- capability's command schema was updated, not the device-config); a
+--- `switch`-style tile has no confirmed-working example anywhere in this
+--- driver (scheduleEnabled, the proven-good sibling tile right next to
+--- this one, has always been list-style). This handler backs the new
+--- `setShowSchedule` command that the list-style presentation actually
+--- calls; turnOn/turnOff above are now unused leftovers, same pattern as
+--- other capabilities in this driver that carry harmless dead commands.
+local function set_show_schedule(driver, device, command)
+  device:emit_component_event(device.profile.components.schedule,
+    SHOW_SCHEDULE_CAP.showSchedule({ value = command.args.showSchedule }))
+  refresh_schedule_exists_gates(driver, device)
+end
+
+--- Real read-modify-write: queries the current schedules, re-derives
+--- `slot`'s auto-discovered target the same way apply_schedule_status
+--- does (sort named schedules alphabetically, pick position `slot.index`
+--- -- see the header comment above SCHEDULE_SLOTS), patches ONLY the
+--- enable flag via baf.set_schedule_enabled (never reconstructs a
+--- schedule from scratch), writes it back, and verifies via
+--- BafClient.commit_schedule_and_verify. Every failure mode (no IP yet,
+--- query failed, nothing at that position, patch refused, write not
+--- verified) is logged and returns without emitting a new (possibly
+--- wrong) status -- apply_schedule_status will pick up whatever the
+--- fan's real state actually is on the next refresh/init rather than
+--- this handler ever guessing.
+--- **Re-resolves fresh at command time rather than trusting a cached
+--- position** -- this is what makes auto-discovery safe to act on: the
+--- schedule this command actually touches is always whatever the same
+--- sort+pick algorithm currently returns for this slot, guaranteed
+--- consistent with whatever apply_schedule_status most recently
+--- displayed (same algorithm, just possibly a few seconds staler).
+local function set_named_schedule_enabled(driver, device, command, slot)
   local ip = resolve_ip(device)
   if not ip then
-    log.warn("BAF setScheduleEnabled attempted before device is fully configured")
-    return
-  end
-  local name = device.preferences and device.preferences.scheduleName
-  if not name or name == "" then
-    log.warn("BAF setScheduleEnabled: no scheduleName preference configured")
+    log.warn("BAF " .. slot.command_name .. " attempted before device is fully configured")
     return
   end
   local schedules, query_err = BafClient.query_schedules(ip, 5)
   if not schedules then
-    log.error("BAF setScheduleEnabled: schedule query failed: " .. tostring(query_err))
+    log.error("BAF " .. slot.command_name .. ": schedule query failed: " .. tostring(query_err))
     return
   end
-  local sched = baf.find_schedule_by_name(schedules, name)
+  local named = baf.sorted_named_schedules(schedules)
+  local sched = named[slot.index]
   if not sched then
-    log.error("BAF setScheduleEnabled: no schedule named '" .. name .. "' found")
+    log.error("BAF " .. slot.command_name .. ": no named schedule at position " .. slot.index ..
+      " (" .. #named .. " named schedule(s) present)")
     return
   end
   local want_enabled = command.args.value == "On"
   local new_raw, patch_err = baf.set_schedule_enabled(sched.raw, want_enabled)
   if not new_raw then
-    log.error("BAF setScheduleEnabled: patch refused: " .. tostring(patch_err))
+    log.error("BAF " .. slot.command_name .. ": patch refused: " .. tostring(patch_err))
     return
   end
   local ok, write_err = BafClient.commit_schedule_and_verify(ip, new_raw, 5)
   if not ok then
-    log.error("BAF setScheduleEnabled: write did not verify: " .. tostring(write_err))
+    log.error("BAF " .. slot.command_name .. ": write did not verify: " .. tostring(write_err))
     return
   end
   device:emit_component_event(device.profile.components.schedule,
-    SCHEDULE_ENABLED_CAP.scheduleEnabled({ value = want_enabled and "On" or "Off" }))
+    slot.cap[slot.attr]({ value = want_enabled and "On" or "Off" }))
+end
+
+local function set_schedule_enabled(driver, device, command)
+  set_named_schedule_enabled(driver, device, command, SCHEDULE_SLOTS[1])
+end
+
+local function set_second_schedule_enabled(driver, device, command)
+  set_named_schedule_enabled(driver, device, command, SCHEDULE_SLOTS[2])
+end
+
+local function set_third_schedule_enabled(driver, device, command)
+  set_named_schedule_enabled(driver, device, command, SCHEDULE_SLOTS[3])
 end
 
 local function fan_beep_on(driver, device, command)
@@ -1450,9 +1596,16 @@ local baf_driver = Driver("bigassfans-i6-lan", {
     [SHOW_SCHEDULE_CAP.ID] = {
       ["turnOn"] = show_schedule_on,
       ["turnOff"] = show_schedule_off,
+      ["setShowSchedule"] = set_show_schedule,
     },
     [SCHEDULE_ENABLED_CAP.ID] = {
       ["setScheduleEnabled"] = set_schedule_enabled,
+    },
+    [SECOND_SCHEDULE_ENABLED_CAP.ID] = {
+      ["setSecondScheduleEnabled"] = set_second_schedule_enabled,
+    },
+    [THIRD_SCHEDULE_ENABLED_CAP.ID] = {
+      ["setThirdScheduleEnabled"] = set_third_schedule_enabled,
     },
     [capabilities.refresh.ID] = {
       [capabilities.refresh.commands.refresh.NAME] = refresh_handler,

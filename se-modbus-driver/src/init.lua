@@ -109,7 +109,7 @@ local function start_polling(driver, device)
     settings.ip, settings.port, settings.poll_interval))
 end
 
-local CURRENT_PROFILE = "solaredge-inverter.v5"
+local CURRENT_PROFILE = "solaredge-inverter.v6"
 
 local function device_init(driver, device)
   log.info("SolarEdge device init (profile migration check): " .. device.id)
