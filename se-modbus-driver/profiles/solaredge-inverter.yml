@@ -1,6 +1,7 @@
-name: solaredge-inverter.v5
+name: solaredge-inverter.v6
 components:
   - id: main
+    label: "Main"
     capabilities:
       - id: powerMeter
         version: 1
