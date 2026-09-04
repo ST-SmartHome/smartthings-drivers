@@ -120,6 +120,19 @@ local THIRD_SCHEDULE_LABEL_CAP = capabilities["examplens.thirdScheduleLabel"]
 local SCHEDULE_ENABLED_CAP = capabilities["examplens.scheduleEnabled"]
 local SECOND_SCHEDULE_ENABLED_CAP = capabilities["examplens.secondScheduleEnabled"]
 local THIRD_SCHEDULE_ENABLED_CAP = capabilities["examplens.thirdScheduleEnabled"]
+-- Slots 4/5 added 2026-09-04, per explicit user correction: the original
+-- requirement was to surface ALL named schedules, not just the first 3 --
+-- SmartThings has no way to render a truly unbounded list (every tile
+-- needs a capability declared statically ahead of time), and neither the
+-- fan's firmware nor the official app documents any real maximum schedule
+-- count, so 5 was picked as a generous practical ceiling, not derived
+-- from a known limit. Same exact pattern as slots 1-3 in every respect.
+local SCHEDULE_FOUR_EXISTS_CAP = capabilities["examplens.scheduleFourExists"]
+local SCHEDULE_FIVE_EXISTS_CAP = capabilities["examplens.scheduleFiveExists"]
+local FOURTH_SCHEDULE_LABEL_CAP = capabilities["examplens.fourthScheduleLabel"]
+local FIFTH_SCHEDULE_LABEL_CAP = capabilities["examplens.fifthScheduleLabel"]
+local FOURTH_SCHEDULE_ENABLED_CAP = capabilities["examplens.fourthScheduleEnabled"]
+local FIFTH_SCHEDULE_ENABLED_CAP = capabilities["examplens.fifthScheduleEnabled"]
 local WAKE_UP_MOTION_TIMEOUT_CAP = capabilities["examplens.wakeUpMotionTimeout"]
 
 --- Auto-discovered schedule slots (Phase 1 of SCHEDULE_FEATURE_PLAN.md,
@@ -148,6 +161,12 @@ local SCHEDULE_SLOTS = {
   { index = 3, exists_cap = SCHEDULE_THREE_EXISTS_CAP, exists_attr = "scheduleThreeExists",
     label_cap = THIRD_SCHEDULE_LABEL_CAP, label_attr = "thirdScheduleLabel",
     cap = THIRD_SCHEDULE_ENABLED_CAP, attr = "thirdScheduleEnabled", command_name = "setThirdScheduleEnabled" },
+  { index = 4, exists_cap = SCHEDULE_FOUR_EXISTS_CAP, exists_attr = "scheduleFourExists",
+    label_cap = FOURTH_SCHEDULE_LABEL_CAP, label_attr = "fourthScheduleLabel",
+    cap = FOURTH_SCHEDULE_ENABLED_CAP, attr = "fourthScheduleEnabled", command_name = "setFourthScheduleEnabled" },
+  { index = 5, exists_cap = SCHEDULE_FIVE_EXISTS_CAP, exists_attr = "scheduleFiveExists",
+    label_cap = FIFTH_SCHEDULE_LABEL_CAP, label_attr = "fifthScheduleLabel",
+    cap = FIFTH_SCHEDULE_ENABLED_CAP, attr = "fifthScheduleEnabled", command_name = "setFifthScheduleEnabled" },
 }
 
 local OFF_ON_AUTO_TO_STRING = { [0] = "Off", [1] = "On", [2] = "Auto" }
@@ -796,7 +815,7 @@ end
 local WITH_ADDFAN_PROFILE = "bigassfans-h.v8"
 local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v8"
 local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v9"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v35"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v36"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
 -- All four reset to nil after the 2026-08-27 v2->v3 bump above (a new
@@ -1360,6 +1379,14 @@ local function set_third_schedule_enabled(driver, device, command)
   set_named_schedule_enabled(driver, device, command, SCHEDULE_SLOTS[3])
 end
 
+local function set_fourth_schedule_enabled(driver, device, command)
+  set_named_schedule_enabled(driver, device, command, SCHEDULE_SLOTS[4])
+end
+
+local function set_fifth_schedule_enabled(driver, device, command)
+  set_named_schedule_enabled(driver, device, command, SCHEDULE_SLOTS[5])
+end
+
 local function fan_beep_on(driver, device, command)
   send_more_commit(device, "fan_beep_enable", true)
 end
@@ -1606,6 +1633,12 @@ local baf_driver = Driver("bigassfans-i6-lan", {
     },
     [THIRD_SCHEDULE_ENABLED_CAP.ID] = {
       ["setThirdScheduleEnabled"] = set_third_schedule_enabled,
+    },
+    [FOURTH_SCHEDULE_ENABLED_CAP.ID] = {
+      ["setFourthScheduleEnabled"] = set_fourth_schedule_enabled,
+    },
+    [FIFTH_SCHEDULE_ENABLED_CAP.ID] = {
+      ["setFifthScheduleEnabled"] = set_fifth_schedule_enabled,
     },
     [capabilities.refresh.ID] = {
       [capabilities.refresh.commands.refresh.NAME] = refresh_handler,
