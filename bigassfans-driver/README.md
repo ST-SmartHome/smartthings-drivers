@@ -61,11 +61,18 @@ fan" management tile, or the pre-split light layout.
     stays first and ungated — a section's first `detailView` tile can
     never fully hide on this platform, so it's the anchor the rest hide
     behind.
-  - `schedule` — auto-discovers up to 3 *named* on-device schedules every
+  - `schedule` — auto-discovers up to 5 *named* on-device schedules every
     poll (decoded via a real pcap, see `baf_protocol.lua`'s "Schedule
-    write path" comment): sorted alphabetically and bound to slots 1–3,
+    write path" comment): sorted alphabetically and bound to slots 1–5,
     since the fan's own "slot" field is a revision counter, not a stable
-    identity. Each slot shows a read-only name plus its own enable/
+    identity. **5 is a practical ceiling, not a discovered limit** —
+    SmartThings can't render a truly unbounded list (every tile needs a
+    capability declared statically ahead of time), and neither the fan's
+    firmware nor the official app documents an actual maximum schedule
+    count. If you have more than 5 named schedules on a fan, only the
+    alphabetically-first 5 are visible/controllable here — the rest are
+    simply not surfaced (not an error, just not built). Each slot shows
+    a read-only name plus its own enable/
     disable toggle; unused slots hide entirely rather than showing empty,
     via a per-slot existence-gate capability (`visibleCondition` only
     checks one attribute, so Show-Schedule + exists is folded into one).
@@ -132,8 +139,9 @@ directly against it.
   has a live conflict between two candidate meanings, and this cluster
   behaves like MORE_PUSH (invisible to a query from a separate
   connection), so only a real passive capture can resolve it.
-- Schedule auto-discovery covers up to 3 *named* schedules only — full
-  create/edit (day/time/action) and nameless (Bedtime/Wake-Up) schedules
-  are unbuilt. Design for going further: `SCHEDULE_FEATURE_PLAN.md`.
+- Schedule auto-discovery covers up to 5 *named* schedules only (see
+  Architecture above for why 5, not an unbounded list) — full create/edit
+  (day/time/action) and nameless (Bedtime/Wake-Up) schedules are unbuilt.
+  Design for going further: `SCHEDULE_FEATURE_PLAN.md`.
 - Fan-speed slider shows plain numeric labels (0–7) — no established
   naming convention for an 8-speed fan exists yet.
