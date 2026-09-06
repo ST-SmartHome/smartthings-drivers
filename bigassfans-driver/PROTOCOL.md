@@ -22,13 +22,23 @@ query first (see `BafClient.commit_and_verify_more`).
 | 9 | `uuid9` | string | ALL | A device identity UUID — present in the public reference schema, purpose vs. `dns_sd_uuid` not documented anywhere |
 | 10 | `dns_sd_uuid` | string | ALL | Same UUID published in the fan's mDNS TXT record — confirmed identical via a real probe. This driver currently reads that UUID at the mDNS layer for its DNI, not via this field |
 | 13 | `api_version` | string | ALL | e.g. "8" |
+| 42 | `unoccupied_behavior` | bytes (nested 2-field submessage) | FAN | Motion screen's "when unoccupied" behavior — sub-field 1 = mode enum (1 = "Smart Mix" confirmed; 0 presumably "Turn Off", the app's only other option, not itself observed committed), sub-field 2 = `fan_speed` (native 0–7, only meaningful for Smart Mix). Confirmed both read AND write — the only field in this driver needing a real nested-message encoder in `Commit` |
 | 43 | `fan_mode` | enum | FAN | Off/On/Auto |
 | 44 | `reverse_enable` | bool | FAN | Direction (false=forward, true=reverse). Confirmed to apply with unpredictable delay, sometimes minutes — see the direction-control section in the README |
 | 45 | `speed_percent` | int | FAN | Fan speed as 0–100% |
 | 46 | `speed` | int | FAN | Fan speed, native 0–7 range |
-| 52 | `motion_sense_enable` | bool | FAN | Motion/occupancy sensing master enable. Only takes effect while `fan_mode = AUTO`. Confirmed working — write applies immediately, not delayed |
+| 47 | `comfort_enable` | bool | FAN | Comfort screen's "Auto Comfort" master toggle — confirmed via an isolated 0→1 commit |
+| 48 | `comfort_ideal_temp` | int (×100 °C) | FAN | Comfort screen's target temperature |
+| 50 | `comfort_min_speed` | int | FAN | Comfort screen's "Min Speed", native 0–7 |
+| 51 | `comfort_max_speed` | int | FAN | Comfort screen's "Max Speed", native 0–7 (7 = on-screen "No Max") |
+| 52 | `motion_sense_enable` | bool | FAN | Motion/occupancy sensing master enable. Only takes effect while `fan_mode = AUTO`. Confirmed working — write applies immediately, not delayed. (This field was once ambiguous with `heat_assist_reverse` below; an isolated capture resolved it — 52 really is this, `heat_assist_reverse` is field 62) |
 | 53 | `motion_sense_timeout` | int (seconds) | FAN | How long to keep running after motion stops, once triggered by occupancy (confirmed 7200 = 2 hours on one fan's setting) |
+| 54 | `return_to_auto_enable` | bool | FAN | The FAN-menu "Return to Auto" master toggle — distinct from the Sleep-specific pair at 129/130 below |
+| 55 | `return_to_auto_secs` | int (seconds) | FAN | Duration for the above |
 | 58 | `whoosh_enable` | bool | FAN | Confirmed to apply with unpredictable delay, sometimes minutes — same caveat as `reverse_enable` |
+| 60 | `heat_assist_enable` | bool | FAN | Comfort screen's "Heat Assist" toggle |
+| 61 | `heat_assist_speed` | int | FAN | Heat Assist's own fan speed, native 0–7, independent of the main `speed` field |
+| 62 | `heat_assist_reverse` | bool | FAN | Comfort screen's "Reverse" toggle under Heat Assist — confirmed at field 62, not 52 as first guessed (see 52 above) |
 | 64 | `current_rpm` | int | FAN | Live motor RPM, read-only telemetry |
 | 65 | `eco_enable` | bool | FAN | Confirmed not instant — typically ~1–2 minutes to apply |
 | 66 | `fan_occupancy_detected` | bool | FAN | Read-only — whether the fan currently detects motion in the room |
@@ -177,20 +187,16 @@ Everything below was found via either a packet capture of the official
 app or a raw sweep of every query category, but hasn't been confirmed via
 an isolated single-field capture (toggle exactly one control, verify
 exactly that field changes and nothing else). Treat these as leads, not
-documented behavior — see the "Comfort/Motion" and "Full category sweep"
-sections of `src/baf_protocol.lua`'s `FIELDS` table for the fullest
-detail and caveats on each.
+documented behavior — see the "Full category sweep" section of
+`src/baf_protocol.lua`'s `FIELDS` table for the fullest detail and
+caveats on each.
 
-- **Comfort screen** (all FAN category): `comfort_enable`(47),
-  `comfort_ideal_temp`(48), `comfort_min_speed`(50),
-  `comfort_max_speed`(51), `heat_assist_enable`(60). One real, unresolved
-  conflict: `heat_assist_reverse` was guessed at field **52**, but that
-  field is *already* confirmed as `motion_sense_enable` above (backed by
-  a real hardware test, not just a pcap correlation) — don't trust either
-  attribution for field 52 until an isolated capture resolves it.
-- **Motion/Unoccupied screen**: `unoccupied_behavior`(42, a nested
-  2-field submessage, not a plain scalar), plus two lower-confidence
-  fields (54, 55) seen changing in the same cluster with unclear meaning.
+(The Comfort screen, Motion screen, and `unoccupied_behavior` fields that
+used to be listed here — including the field-52 conflict between
+`heat_assist_reverse` and `motion_sense_enable` — are now fully confirmed
+via an isolated passive packet capture; see the main table above,
+they're no longer candidates.)
+
 - **Found via a full category sweep** (not a pcap): `fan_target_rpm`(63,
   FAN) — identical value to the read-only `current_rpm`(64) in the same
   query, worth checking whether it's a real commanded setpoint;
