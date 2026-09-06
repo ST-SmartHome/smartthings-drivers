@@ -151,37 +151,25 @@ directly against it.
 - Fields in real `FAN` responses but missing from the reference `.proto`
   are silently ignored.
 - mDNS reflection across VLANs is untested.
-- ~~Comfort/Motion-detection fields not confirmed / not wired into any
-  capability~~ — **shipped**: every field in this cluster is confirmed
-  via an isolated passive packet capture and live as its own
-  collapsible section (see Architecture). The earlier live conflict
-  (field 52 guessed for both `heat_assist_reverse` and
-  `motion_sense_enable`) is resolved: field 52 is really
-  `motion_sense_enable`, `heat_assist_reverse` is field 62. The
-  Unoccupied Behavior nested-submessage write path is built and
-  confirmed live too, not just read-only.
 - Schedule auto-discovery covers up to 5 *named* schedules only (see
   Architecture above for why 5, not an unbounded list) — full create/edit
   (day/time/action) and nameless (Bedtime/Wake-Up) schedules are unbuilt.
   Design for going further: `SCHEDULE_FEATURE_PLAN.md`.
-- This driver has no confirmed-working `displayType: switch` tile
-  anywhere — every custom toggle here (Schedule, Settings, and all 9 in
-  the newer Comfort/Heat/Motion/Return-to-Auto sections) renders as a
-  `list`-style dropdown instead, after a switch-style knob was found to
-  never reliably track state. Ruled out one open theory before settling
-  on dropdowns for good: an isolated test using the stock `switch`
-  capability's own lowercase `on`/`off` value convention (vs. this
-  driver's usual capitalized `On`/`Off`) showed the identical
-  stuck-knob bug, so it isn't about value casing — it's a genuine
-  platform rendering defect, and dropdowns aren't a workaround, they're
-  the only reliable option.
+- Fan-speed slider shows plain numeric labels (0–7) — no established
+  naming convention for an 8-speed fan exists yet.
+
+## Platform quirks worth knowing (all confirmed, shaped this driver's design)
+
+- No confirmed-working `displayType: switch` tile anywhere in this
+  driver — the knob visually doesn't track state, confirmed independent
+  of value casing. `displayType: list` (a Hide/Show or On/Off dropdown)
+  is the only reliable toggle rendering here; every custom toggle uses
+  it.
 - A capability's rendered label is frozen permanently at
   `capabilities:create` time from whatever name was submitted — no
   later presentation/translation edit has ever been observed to change
-  it. A component's first `detailView` tile also always renders as a
-  prominent banner regardless of capability type. Both shaped this
-  driver's collapsible-section design: a phantom show/hide dropdown
-  always occupies the first slot (it's fine to be a banner, since it's
-  always visible anyway), with the real enable toggle second.
-- Fan-speed slider shows plain numeric labels (0–7) — no established
-  naming convention for an 8-speed fan exists yet.
+  it. Get the name right at creation.
+- A component's first `detailView` tile always renders as a prominent
+  banner regardless of capability type — why every collapsible section
+  here puts a phantom show/hide dropdown first (fine to be a banner,
+  it's always visible anyway) and the real enable toggle second.
