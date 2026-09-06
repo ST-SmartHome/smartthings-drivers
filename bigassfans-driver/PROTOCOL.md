@@ -31,14 +31,14 @@ query first (see `BafClient.commit_and_verify_more`).
 | 48 | `comfort_ideal_temp` | int (×100 °C) | FAN | Comfort screen's target temperature |
 | 50 | `comfort_min_speed` | int | FAN | Comfort screen's "Min Speed", native 0–7 |
 | 51 | `comfort_max_speed` | int | FAN | Comfort screen's "Max Speed", native 0–7 (7 = on-screen "No Max") |
-| 52 | `motion_sense_enable` | bool | FAN | Motion/occupancy sensing master enable. Only takes effect while `fan_mode = AUTO`. Confirmed working — write applies immediately, not delayed. (This field was once ambiguous with `heat_assist_reverse` below; an isolated capture resolved it — 52 really is this, `heat_assist_reverse` is field 62) |
+| 52 | `motion_sense_enable` | bool | FAN | Motion/occupancy sensing master enable. Only takes effect while `fan_mode = AUTO`. Confirmed working — write applies immediately, not delayed |
 | 53 | `motion_sense_timeout` | int (seconds) | FAN | How long to keep running after motion stops, once triggered by occupancy (confirmed 7200 = 2 hours on one fan's setting) |
 | 54 | `return_to_auto_enable` | bool | FAN | The FAN-menu "Return to Auto" master toggle — distinct from the Sleep-specific pair at 129/130 below |
 | 55 | `return_to_auto_secs` | int (seconds) | FAN | Duration for the above |
 | 58 | `whoosh_enable` | bool | FAN | Confirmed to apply with unpredictable delay, sometimes minutes — same caveat as `reverse_enable` |
 | 60 | `heat_assist_enable` | bool | FAN | Comfort screen's "Heat Assist" toggle |
 | 61 | `heat_assist_speed` | int | FAN | Heat Assist's own fan speed, native 0–7, independent of the main `speed` field |
-| 62 | `heat_assist_reverse` | bool | FAN | Comfort screen's "Reverse" toggle under Heat Assist — confirmed at field 62, not 52 as first guessed (see 52 above) |
+| 62 | `heat_assist_reverse` | bool | FAN | Comfort screen's "Reverse" toggle under Heat Assist. (Fields 52 and 62 were once confused with each other during initial discovery — an isolated capture resolved which is which; both rows above now reflect the confirmed answer.) |
 | 64 | `current_rpm` | int | FAN | Live motor RPM, read-only telemetry |
 | 65 | `eco_enable` | bool | FAN | Confirmed not instant — typically ~1–2 minutes to apply |
 | 66 | `fan_occupancy_detected` | bool | FAN | Read-only — whether the fan currently detects motion in the room |
@@ -72,99 +72,55 @@ from the `Properties` table above — the field numbers coincidentally
 overlapping with unrelated `Properties` fields is not a conflict, just
 two independent numbering spaces.
 
-**The schedule write path is now decoded too**, confirmed via a real
-pcap of the app creating, editing, and deleting schedule entries (an
-earlier claim that this goes through BAF's cloud API instead was too
-broad — based on one screen that happened not to show a local commit,
-not the whole write surface). `Commit` (the same message every other
-write in this driver already uses) has a **field 4**, never modeled by
-this driver or any reference project before:
+**Schedule writes go through `Commit` field 4** (the same `Commit`
+message every other write in this driver uses), shape
 `{1: <slot index, varint>, 2: <Schedule message, or empty for a
-delete>}`. Three real captured examples:
+delete>}`. Three captured examples:
 
 - Re-saving an existing light-type schedule unchanged: `4: {1: 1, 2: {2:
   "My Schedule", 4: [1,2,3,4,5,6,7], 5: 1, 6: 1, 7: {1: "17:00",
-  2: {5: 2}, 2: {18: 10800}}}}` — content matching the read-side decode
+  2: {5: 2}, 2: {18: 10800}}}}` — content matches the read-side decode
   exactly (day list, name, time, light action).
 - Creating a new Bedtime/Wake-Up-type schedule (no name, no light
   action): `4: {1: 1, 2: {1: 1, 4: [2,3,4,5,6,7,1], 5: 2, 6: 1,
   7: {1: "23:00"}, 8: {1: "06:00"}}}` — a genuinely different shape from
-  the light schedule's, confirming `Schedule`'s content depends on its
-  type. None of the fan's live Sleep sub-settings (configured in the same
-  app flow, via the normal `Commit{3: properties}` path — see the FIELDS
-  table above) appear in this payload at all; the best-supported reading
-  is that a Bedtime/Wake-Up schedule just triggers Sleep Mode on/off at
-  the given times using whatever the fan's live Sleep configuration
-  already is, rather than carrying its own snapshot.
-- Deleting that schedule: `4: {1: 2, 2: {1: 1}}` — note slot index 2
-  here, not the 1 both saves used.
+  the light schedule's; `Schedule`'s content depends on its type. None of
+  the fan's live Sleep sub-settings appear in this payload at all — the
+  best-supported reading is that a Bedtime/Wake-Up schedule just triggers
+  Sleep Mode on/off at the given times using whatever Sleep configuration
+  the fan already has, rather than carrying its own snapshot.
+- Deleting that schedule: `4: {1: 2, 2: {1: 1}}` — slot index 2 here, not
+  the 1 both saves used; the outer wrap's slot/"index" field is not a
+  stable per-schedule identity (two schedules on the same fan have been
+  observed reporting the identical value simultaneously — more likely a
+  revision/generation counter) and **every known write in this driver
+  and the official app itself always sends `1` regardless**. Match/target
+  a specific schedule by name, never by this slot value.
 
-**A "single schedule slot" theory was tested and disproven the same
-session — the fan supports multiple coexisting schedules.** A generic
-protobuf encoder was built and verified byte-for-byte against the
-captured re-save frame above before touching real hardware. Re-saving
-"My Schedule" unchanged round-tripped byte-identical (safe); creating a
-*second*, differently-named schedule then *appeared* to have replaced
-"My Schedule" outright — a follow-up query seemed to return only the new
-one. **Root cause, found once a second schedule created independently
-through the official app also showed up fine in the app's own list: the
-fan sends one SLIP frame per schedule in response to a single SCHEDULES
-query, and the test script's read function only consumed the first frame
-before closing the connection.** Reading properly (looping to an idle
-timeout instead of stopping after one frame) immediately showed both
-schedules present and fully intact — no data was actually lost. Real
-near-miss from trusting an under-tested harness against live hardware,
-but resolved with no lasting effect. The slot-index question from the
-delete example above is still open — not explained by the one-slot
-theory, which was wrong.
+**A single `SCHEDULES` query returns multiple SLIP frames, one per
+configured schedule** — a reader that stops after the first frame will
+silently appear to see only one schedule even when several exist. Always
+read to an idle timeout, not just the first frame.
 
-**A third, richer `Schedule` shape** was found from the user's own real
-schedule (a start/end time range with per-boundary fan+light actions):
+**A third, richer `Schedule` shape** was found from a real user schedule
+(a start/end time range with per-boundary fan+light actions):
 `{1: 1, 2: "Test schedule", 4: [1..7], 5: 1, 6: 1,
 7: {1: "22:00", 2: {1: 1}, 2: {4: 4}, 2: {5: 1}, 2: {6: 64}},
 8: {1: "08:00", 2: {1: 2}, 2: {11: 1}, 2: {12: 2300}, 2: {13: 4},
 2: {14: 3}, 2: {15: 1}}}` — raw decode only, matched loosely against the
 app's own screen (Start 22:00: Speed 4, Light 64%; End 08:00: Fan Auto,
-no light action) but not independently isolated-tested, treat as a lead
-for a future capture, not documented behavior. Real decode gotcha hit
-here: a short ASCII time string ("08:00") can coincidentally parse as a
-syntactically-valid nested tag+varint sequence — always sanity-check a
-`bytes` field as a plain string first before trusting a recursive
-protobuf re-decode of it.
+no light action) but not independently isolated-tested; treat as a lead
+for a future capture, not documented behavior.
 
-**Practical implication, still true even though the one-slot theory was
-wrong**: a write should still default to read-modify-write (fetch
-existing schedules, change only what's needed) rather than constructing
-one from scratch, since exact multi-schedule capacity/collision rules
-are still unconfirmed. **Design note**: the eventual feature's schedule
-section should be its own collapsible menu (the same phantom-switch
-pattern this driver already uses for its Device Settings section), not
-folded into an existing component.
+**Decode gotcha**: a short ASCII time string (e.g. "08:00") can
+coincidentally parse as a syntactically-valid nested tag+varint
+sequence — always sanity-check a `bytes` field as a plain string first
+before trusting a recursive protobuf re-decode of it.
 
-**SHIPPED — `scheduleEnabled` capability live, verified end-to-end.**
-Scoped to enabling/disabling ONE schedule, matched by exact name via a
-`scheduleName` preference — never constructs a schedule from scratch,
-always reads the real one first and patches only field 6 (the enable
-flag) via a position-aware, top-level-field-only walk (not a naive
-whole-buffer byte search — a real substring collision was caught and
-fixed before shipping: field 5's top-level encoding also happens to
-appear nested inside a schedule's own action sub-structure).
-
-**A real bug found and fixed during the first live end-to-end test**:
-the write handler originally reused a schedule's own read-side "slot"
-value (the outer wrap's field 1) as the write's target — the write
-silently had no effect. That slot field is **not** a stable per-schedule
-write target — both schedules on a real fan were observed reporting the
-identical value simultaneously (more likely some kind of revision/
-generation counter) — **the write's slot argument must always be the
-fixed value `1`**, matching what the real official app used for every
-create/edit in the original pcap regardless of the schedule's own
-read-side slot. Fixed (verification now matches by schedule name, not
-slot number), redeployed, confirmed live: real `setScheduleEnabled`
-commands sent through the actual SmartThings API correctly toggled a
-test schedule off and back on, independently re-verified via a direct
-probe outside SmartThings each time, with the real, already-configured
-schedule confirmed completely untouched throughout every test.
+**Practical implication**: a write should default to read-modify-write
+(fetch existing schedules, change only what's needed) rather than
+constructing one from scratch, since exact multi-schedule capacity/
+collision rules are still unconfirmed.
 
 ## `Capabilities` submessage (field 17, SENSORS category)
 
@@ -190,12 +146,6 @@ exactly that field changes and nothing else). Treat these as leads, not
 documented behavior — see the "Full category sweep" section of
 `src/baf_protocol.lua`'s `FIELDS` table for the fullest detail and
 caveats on each.
-
-(The Comfort screen, Motion screen, and `unoccupied_behavior` fields that
-used to be listed here — including the field-52 conflict between
-`heat_assist_reverse` and `motion_sense_enable` — are now fully confirmed
-via an isolated passive packet capture; see the main table above,
-they're no longer candidates.)
 
 - **Found via a full category sweep** (not a pcap): `fan_target_rpm`(63,
   FAN) — identical value to the read-only `current_rpm`(64) in the same
