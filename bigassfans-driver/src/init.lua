@@ -982,7 +982,18 @@ local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v46"
 local WITH_ADDFAN_PROFILE_ID = nil
 local NO_ADDFAN_PROFILE_ID = nil
 local NO_LIGHT_PROFILE_ID = nil
-local NO_LIGHT_NO_ADDFAN_PROFILE_ID = nil
+-- Filled in via a live GET /v1/devices read on real hardware already
+-- running this profile -- was left `nil` since the 2026-08-27 v2->v3
+-- bump above, and nobody re-confirmed it against a live device after
+-- later bumps (v3->...->v46). Left nil, `ensure_correct_profile`'s
+-- "already on the right profile" check can never match a real device's
+-- profile.id (a real UUID never equals nil), so every device_init was
+-- unconditionally re-requesting a switch to a profile the device was
+-- already correctly on. Harmless per se, but redundant
+-- try_update_metadata calls have caused a disruptive "capabilities
+-- changed" dialog elsewhere in this exact driver's history -- see the
+-- info_changed oscillation writeup in the gotchas memory.
+local NO_LIGHT_NO_ADDFAN_PROFILE_ID = "a1b2c3d4-0000-3000-8000-000000000046"
 
 local PROFILE_TO_ID = {
   [WITH_ADDFAN_PROFILE] = WITH_ADDFAN_PROFILE_ID,

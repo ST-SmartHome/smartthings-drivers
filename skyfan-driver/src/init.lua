@@ -611,17 +611,46 @@ end
 -- incident on this hardware.
 local DIRECTION_STOP_VERIFY_DELAY_SECONDS = 2
 local MAX_STOP_ATTEMPTS = 3
+-- The stop-verify-commit sequence above spans several seconds (up to
+-- DIRECTION_STOP_VERIFY_DELAY_SECONDS * MAX_STOP_ATTEMPTS between the
+-- first stop commit and a final give-up), with zero coordination between
+-- overlapping calls -- before this interlock, set_direction was one
+-- synchronous send_dp with a race window of about one TCP round-trip;
+-- widening that window by roughly an order of magnitude without adding
+-- a guard meant two direction taps in quick succession could run two
+-- independent stop/verify/commit chains at once, with whichever one's
+-- delayed callback happened to land last deciding the final direction,
+-- not necessarily the user's actual last choice. Each new set_direction
+-- call stamps a fresh token on the device; every step of the chain below
+-- checks it's still current before doing anything, so a superseded
+-- in-flight sequence quietly abandons itself instead of racing a newer
+-- one.
+local DIRECTION_CHANGE_TOKEN_FIELD = "direction_change_token"
 
 --- Re-queries status and, once DP1 (switch) confirms off, commits DP8
 --- (direction) and refreshes. Retries the stop commit up to
 --- MAX_STOP_ATTEMPTS times if the fan hasn't confirmed stopped yet.
 --- `s` (settings) is resolved once by the caller and threaded through,
 --- since this runs from scheduled callbacks rather than a fresh command
---- invocation. Wrapped in pcall for the same reason as poll_once -- an
---- uncaught error here must not propagate out of a scheduled callback.
-local function verify_stopped_then_set_direction(driver, device, s, target_direction, attempt)
+--- invocation. `token` must still match the device's current
+--- DIRECTION_CHANGE_TOKEN_FIELD for this call to do anything -- see the
+--- comment above DIRECTION_CHANGE_TOKEN_FIELD for why. Wrapped in pcall
+--- for the same reason as poll_once -- an uncaught error here must not
+--- propagate out of a scheduled callback.
+local function verify_stopped_then_set_direction(driver, device, s, target_direction, attempt, token)
   local ok, err = pcall(function()
+    if device:get_field(DIRECTION_CHANGE_TOKEN_FIELD) ~= token then
+      log.info("Skyfan DC direction-change sequence superseded by a newer request, abandoning this one")
+      return
+    end
     local dps, query_err = TuyaClient.query_status(s.ip, s.local_key, s.device_id, 5)
+    -- Re-check right before committing too: the query above is a real
+    -- network round-trip (a yield point), so a newer set_direction call
+    -- could have landed while it was in flight.
+    if device:get_field(DIRECTION_CHANGE_TOKEN_FIELD) ~= token then
+      log.info("Skyfan DC direction-change sequence superseded during its status query, abandoning this one")
+      return
+    end
     if dps and dps["1"] == false then
       apply_fan_status(device, dps)
       local committed, commit_err = TuyaClient.set_dps(s.ip, s.local_key, s.device_id, {["8"] = target_direction}, 5)
@@ -637,12 +666,28 @@ local function verify_stopped_then_set_direction(driver, device, s, target_direc
         attempt .. "), resending stop: " .. tostring(query_err))
       TuyaClient.set_dps(s.ip, s.local_key, s.device_id, {["1"] = false}, 5)
       device.thread:call_with_delay(DIRECTION_STOP_VERIFY_DELAY_SECONDS, function()
-        verify_stopped_then_set_direction(driver, device, s, target_direction, attempt + 1)
+        verify_stopped_then_set_direction(driver, device, s, target_direction, attempt + 1, token)
       end)
     else
       log.error("Skyfan DC fan did not confirm stopped after " .. attempt ..
         " attempts -- aborting direction change for motor safety")
-      poll_once(driver, device)
+      -- Reuse the dps this same attempt already fetched just above
+      -- instead of opening a brand-new TCP connection purely to refresh
+      -- the UI -- mirrors poll_once's own apply_fan_status/
+      -- apply_light_status/light-child sequence so this stays a faithful
+      -- substitute, not a narrower refresh. Only fall back to a fresh
+      -- poll_once if the query itself failed outright (dps is nil), since
+      -- there's nothing to reuse in that case.
+      if dps then
+        apply_fan_status(device, dps)
+        apply_light_status(device, dps)
+        local child = find_light_child(driver, device)
+        if child then
+          apply_light_status(child, dps)
+        end
+      else
+        poll_once(driver, device)
+      end
     end
   end)
   if not ok then
@@ -656,13 +701,19 @@ local function set_direction(driver, device, command)
     log.warn("Skyfan DC setDirection attempted before device is fully configured")
     return
   end
+  -- Mint a fresh token for this call before anything else, so an
+  -- in-flight sequence from an earlier, now-superseded setDirection
+  -- (still waiting out its own delay) recognizes it's stale on its very
+  -- next check and abandons itself instead of racing this one.
+  local token = (device:get_field(DIRECTION_CHANGE_TOKEN_FIELD) or 0) + 1
+  device:set_field(DIRECTION_CHANGE_TOKEN_FIELD, token)
   local stopped, err = TuyaClient.set_dps(s.ip, s.local_key, s.device_id, {["1"] = false}, 5)
   if not stopped then
     log.error("Skyfan DC direction-change stop commit failed: " .. tostring(err))
     return
   end
   device.thread:call_with_delay(DIRECTION_STOP_VERIFY_DELAY_SECONDS, function()
-    verify_stopped_then_set_direction(driver, device, s, command.args.direction, 1)
+    verify_stopped_then_set_direction(driver, device, s, command.args.direction, 1, token)
   end)
 end
 
