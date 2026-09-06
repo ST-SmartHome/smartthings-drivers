@@ -6,6 +6,7 @@ local discovery = require "discovery"
 local SolarEdge = require "solaredge"
 
 local POLL_TIMER_FIELD = "poll_timer"
+local POLL_IN_PROGRESS_FIELD = "poll_in_progress"
 local STATUS_CAP = capabilities["examplens.inverterStatus"]
 local GRID_ENERGY_CAP = capabilities["examplens.gridEnergy"]
 
@@ -20,11 +21,24 @@ local function get_settings(device)
 end
 
 --- Wrapped in pcall: an uncaught Lua error here must not propagate past this
---- function. start_polling calls this synchronously before registering the
---- recurring timer — if it throws instead of returning, the timer
---- registration line never runs and polling silently never starts,
---- permanently, until the driver restarts.
+--- function. Also guarded by POLL_IN_PROGRESS_FIELD: pcall only protects
+--- against this throwing, not against it taking a long time to return
+--- (an unreachable/slow inverter can stall well past a minute --
+--- SunSpec.find_model alone allows up to 20 round-trips at a 5s socket
+--- timeout each, for both the inverter and the meter lookups), and
+--- start_polling now registers the recurring timer BEFORE the immediate
+--- first call below rather than after, specifically so a slow first
+--- call no longer delays the timer's own existence. Without this guard,
+--- that reordering could let a still-running slow poll overlap with the
+--- next scheduled one for the same device -- a real problem here since
+--- the inverter's own Modbus stack only accepts one TCP connection at a
+--- time (confirmed via the vendor's technical note, see solaredge.lua).
 local function poll_once(driver, device)
+  if device:get_field(POLL_IN_PROGRESS_FIELD) then
+    log.info("SolarEdge poll already in progress for this device, skipping overlapping call")
+    return
+  end
+  device:set_field(POLL_IN_PROGRESS_FIELD, true)
   local ok, err = pcall(function()
     local settings = get_settings(device)
     if not settings.ip or settings.ip == "" then
@@ -81,6 +95,7 @@ local function poll_once(driver, device)
       device:emit_component_event(grid, GRID_ENERGY_CAP.imported({ value = reading.grid_imported_wh / 1000.0, unit = "kWh" }))
     end
   end)
+  device:set_field(POLL_IN_PROGRESS_FIELD, false)
   if not ok then
     log.error("SolarEdge poll crashed: " .. tostring(err))
   end
@@ -99,14 +114,19 @@ local function start_polling(driver, device)
     return
   end
 
-  -- Poll once immediately, then on the configured interval.
-  poll_once(driver, device)
+  -- Register the recurring timer BEFORE the immediate poll below (not
+  -- after, as this used to) -- poll_once's own comment explains why:
+  -- a slow first call (unreachable/misconfigured inverter) no longer
+  -- delays the timer's own registration, safe now that poll_once's
+  -- in-flight guard prevents this device's scheduled and immediate
+  -- calls from ever overlapping.
   local timer = device.thread:call_on_schedule(settings.poll_interval, function()
     poll_once(driver, device)
   end, "solaredge_poll")
   device:set_field(POLL_TIMER_FIELD, timer)
   log.info(string.format("SolarEdge polling started: %s:%d every %ds",
     settings.ip, settings.port, settings.poll_interval))
+  poll_once(driver, device)
 end
 
 local CURRENT_PROFILE = "solaredge-inverter.v6"

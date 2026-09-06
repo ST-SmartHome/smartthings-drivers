@@ -14,7 +14,16 @@
 
 local log = require "log"
 
-local PROFILE = "solaredge-inverter.v4"
+-- Kept in sync with init.lua's CURRENT_PROFILE (and profiles/solaredge-
+-- inverter.yml's own name: field) -- this drifted to a stale "v4" for a
+-- while after later bumps (v5, v6) only updated init.lua's migration
+-- constant, not this one; see bigassfans-driver's "profile-name bump:
+-- always two edits" gotcha for why that's a recurring risk. Harmless
+-- today (this driver's one device already exists and never goes through
+-- discovery again), but would silently request a nonexistent profile name
+-- if this device were ever deleted and re-added, or the driver freshly
+-- installed elsewhere.
+local PROFILE = "solaredge-inverter.v6"
 -- Static placeholder network id — this is not the inverter's real network
 -- identity (that's the IP, set later via preferences), just a stable id for
 -- the one discoverable device this driver offers.

@@ -82,6 +82,25 @@ local STATUS_NAMES = {
   [5] = "THROTTLED", [6] = "SHUTTING_DOWN", [7] = "FAULT", [8] = "STANDBY",
 }
 
+--- Shared read-raw/apply-scale-factor shapes, factored out of what used to
+--- be 7 hand-duplicated inline blocks in SolarEdge.read (one per field) --
+--- this file has already paid for that duplication once (see OFFSET's own
+--- "phantom gap" comment above), so a future register-map revision only
+--- needs to get one of these three shapes right per field, not
+--- independently re-derive the to_int16-or-not / u32-or-not choice each
+--- time.
+local function scaled_signed16(regs, value_offset, sf_offset)
+  return Modbus.apply_scale_factor(Modbus.to_int16(regs[value_offset]), regs[sf_offset])
+end
+
+local function scaled_unsigned16(regs, value_offset, sf_offset)
+  return Modbus.apply_scale_factor(regs[value_offset], regs[sf_offset])
+end
+
+local function scaled_u32(regs, hi_offset, lo_offset, sf_offset)
+  return Modbus.apply_scale_factor(Modbus.registers_to_u32(regs[hi_offset], regs[lo_offset]), regs[sf_offset])
+end
+
 --- Reads and parses one full sample from the inverter.
 --- Returns { power_w, energy_wh, dc_voltage, dc_power_w, temp_c, status, status_name }
 --- or nil + error string.
@@ -115,28 +134,32 @@ function SolarEdge.read(ip, port, unit_id, timeout_sec)
   -- vendor's technical note, so opening a second connection to check for a
   -- meter would risk contending with this very read). A missing meter is
   -- not an error; just means this installation doesn't have one wired up.
-  local meter_addr, meter_length = SunSpec.find_model(client, METER_MODEL_IDS)
+  -- Resume the chain walk from right after the inverter model instead of
+  -- re-reading the "SunS" identifier and every earlier model's header
+  -- again from address 2 -- model_addr is already that model's DATA start
+  -- (post-header), so its own data occupies exactly model_length
+  -- registers from there; the next model's header starts right after.
+  local meter_addr, meter_length = SunSpec.find_model(client, METER_MODEL_IDS, model_addr + model_length)
   local meter_regs = nil
   if meter_addr and meter_length >= METER_READ_COUNT then
-    meter_regs = client:read_holding_registers(meter_addr, METER_READ_COUNT)
+    local meter_read_err
+    meter_regs, meter_read_err = client:read_holding_registers(meter_addr, METER_READ_COUNT)
+    if not meter_regs then
+      -- Unlike a missing meter (meter_addr == nil, silently normal), this
+      -- is a meter the model-chain walk DID find but couldn't then read --
+      -- worth logging distinctly, since a persistent failure here looks
+      -- identical to "no meter installed" everywhere else (the app, this
+      -- function's own return value) with no diagnostic trail otherwise.
+      log.warn("SolarEdge: grid meter found at model chain address " .. tostring(meter_addr) ..
+        " but read failed: " .. tostring(meter_read_err))
+    end
   end
   client:close()
 
-  local ac_power_raw = Modbus.to_int16(regs[OFFSET.AC_POWER])
-  local ac_power_sf = regs[OFFSET.AC_POWER_SF]
-  local power_w = Modbus.apply_scale_factor(ac_power_raw, ac_power_sf)
-
-  local energy_wh_raw = Modbus.registers_to_u32(regs[OFFSET.AC_ENERGY_WH_HI], regs[OFFSET.AC_ENERGY_WH_LO])
-  local energy_wh_sf = regs[OFFSET.AC_ENERGY_WH_SF]
-  local energy_wh = Modbus.apply_scale_factor(energy_wh_raw, energy_wh_sf)
-
-  local dc_voltage_raw = regs[OFFSET.DC_VOLTAGE]
-  local dc_voltage_sf = regs[OFFSET.DC_VOLTAGE_SF]
-  local dc_voltage = Modbus.apply_scale_factor(dc_voltage_raw, dc_voltage_sf)
-
-  local dc_power_raw = Modbus.to_int16(regs[OFFSET.DC_POWER])
-  local dc_power_sf = regs[OFFSET.DC_POWER_SF]
-  local dc_power_w = Modbus.apply_scale_factor(dc_power_raw, dc_power_sf)
+  local power_w = scaled_signed16(regs, OFFSET.AC_POWER, OFFSET.AC_POWER_SF)
+  local energy_wh = scaled_u32(regs, OFFSET.AC_ENERGY_WH_HI, OFFSET.AC_ENERGY_WH_LO, OFFSET.AC_ENERGY_WH_SF)
+  local dc_voltage = scaled_unsigned16(regs, OFFSET.DC_VOLTAGE, OFFSET.DC_VOLTAGE_SF)
+  local dc_power_w = scaled_signed16(regs, OFFSET.DC_POWER, OFFSET.DC_POWER_SF)
 
   local temp_sf = regs[OFFSET.TEMP_SF]
   local temp_c = nil
@@ -156,15 +179,9 @@ function SolarEdge.read(ip, port, unit_id, timeout_sec)
 
   local grid_power_w, grid_exported_wh, grid_imported_wh = nil, nil, nil
   if meter_regs then
-    local grid_power_raw = Modbus.to_int16(meter_regs[METER_OFFSET.AC_POWER])
-    local grid_power_sf = meter_regs[METER_OFFSET.AC_POWER_SF]
-    grid_power_w = Modbus.apply_scale_factor(grid_power_raw, grid_power_sf)
-
-    local energy_sf = meter_regs[METER_OFFSET.ENERGY_SF]
-    local exported_raw = Modbus.registers_to_u32(meter_regs[METER_OFFSET.EXPORTED_HI], meter_regs[METER_OFFSET.EXPORTED_LO])
-    local imported_raw = Modbus.registers_to_u32(meter_regs[METER_OFFSET.IMPORTED_HI], meter_regs[METER_OFFSET.IMPORTED_LO])
-    grid_exported_wh = Modbus.apply_scale_factor(exported_raw, energy_sf)
-    grid_imported_wh = Modbus.apply_scale_factor(imported_raw, energy_sf)
+    grid_power_w = scaled_signed16(meter_regs, METER_OFFSET.AC_POWER, METER_OFFSET.AC_POWER_SF)
+    grid_exported_wh = scaled_u32(meter_regs, METER_OFFSET.EXPORTED_HI, METER_OFFSET.EXPORTED_LO, METER_OFFSET.ENERGY_SF)
+    grid_imported_wh = scaled_u32(meter_regs, METER_OFFSET.IMPORTED_HI, METER_OFFSET.IMPORTED_LO, METER_OFFSET.ENERGY_SF)
   end
 
   return {
