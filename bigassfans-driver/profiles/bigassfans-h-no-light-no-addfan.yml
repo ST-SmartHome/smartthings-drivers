@@ -1,7 +1,7 @@
-name: bigassfans-h-no-light-no-addfan.v36
+name: bigassfans-h-no-light-no-addfan.v46
 metadata:
   mnmn: SmartThingsCommunity
-  vid: 19868d98-4e73-352a-889d-3ce2be8f2def
+  vid: a1b2c3d4-0000-3000-8000-000000000002
 components:
   - id: main
     label: "Fan+Light"
@@ -22,19 +22,6 @@ components:
         version: 1
     categories:
       - name: Fan
-  - id: settings
-    label: "Device Settings"
-    capabilities:
-      - id: examplens.showSettings
-        version: 1
-      - id: examplens.ledIndicators
-        version: 1
-      - id: examplens.fanBeep
-        version: 1
-      - id: examplens.legacyIrRemote
-        version: 1
-      - id: temperatureMeasurement
-        version: 1
   - id: sleep
     label: "Sleep"
     capabilities:
@@ -73,6 +60,65 @@ components:
       - id: examplens.wakeUpBrightnessGate
         version: 1
       - id: examplens.wakeUpBrightness
+        version: 1
+  - id: comfort
+    label: "Comfort"
+    capabilities:
+      - id: examplens.comfortSection
+        version: 1
+      - id: examplens.comfortEnable
+        version: 1
+      - id: examplens.comfortIdealTemp
+        version: 1
+      - id: examplens.comfortMinSpeed
+        version: 1
+      - id: examplens.comfortMaxSpeed
+        version: 1
+  - id: heat
+    label: "Heat Assist"
+    capabilities:
+      - id: examplens.heatSection
+        version: 1
+      - id: examplens.heatAssistEnable
+        version: 1
+      - id: examplens.heatAssistSpeed
+        version: 1
+      - id: examplens.heatAssistReversal
+        version: 1
+  - id: motion
+    label: "Motion"
+    capabilities:
+      - id: examplens.motionSection
+        version: 1
+      - id: examplens.motionSenseEnable
+        version: 1
+      - id: examplens.motionTimeoutMinutes
+        version: 1
+      - id: examplens.unoccupiedBehaviorMode
+        version: 1
+      - id: examplens.unoccupiedBehaviorSpeed
+        version: 1
+  - id: returnToAuto
+    label: "Return to Auto"
+    capabilities:
+      - id: examplens.returnToAutoSection
+        version: 1
+      - id: examplens.returnToAutoEnable
+        version: 1
+      - id: examplens.returnToAutoMinutes
+        version: 1
+  - id: settings
+    label: "Device Settings"
+    capabilities:
+      - id: examplens.showSettings
+        version: 1
+      - id: examplens.ledIndicators
+        version: 1
+      - id: examplens.fanBeep
+        version: 1
+      - id: examplens.legacyIrRemote
+        version: 1
+      - id: temperatureMeasurement
         version: 1
   - id: schedule
     label: "Schedule"
