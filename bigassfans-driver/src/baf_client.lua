@@ -10,6 +10,7 @@ local socket = require "cosock.socket"
 local slip = require "slip"
 local baf = require "baf_protocol"
 local pb = require "protobuf"
+local log = require "log"
 
 local BAF_PORT = 31415
 local MAX_FRAME_BYTES = 8192 -- safety cap against a runaway/garbled stream
@@ -174,8 +175,26 @@ function BafClient.query_multi(ip, category_names, timeout_sec)
     if not frame then
       break -- out of frames or timed out -- stop, evaluate what we got
     end
-    local payload = slip.decode(frame)
-    local found = baf.parse_frame_fields(payload)
+    -- slip.decode / parse_frame_fields->pb.parse_fields can throw a raw
+    -- Lua error on a malformed/truncated frame (slip.lua's explicit
+    -- "invalid emulation prevention sequence", or a nil-arithmetic error
+    -- from an out-of-range protobuf read) -- neither was pcall-guarded
+    -- here before, so one corrupt frame (plausible on a lossy Wi-Fi link)
+    -- would throw past this whole function's return points and skip
+    -- poll_once's "one immediate retry" entirely, only getting caught 2
+    -- layers up by poll_once's outer pcall as a full cycle loss. Treat a
+    -- corrupt frame the same as an unrecognized one: skip it and keep
+    -- reading -- there may be more frames left in this burst.
+    local decode_ok, payload_or_err = pcall(slip.decode, frame)
+    if not decode_ok then
+      log.warn("BAF query_multi: dropping malformed frame (slip.decode failed): " .. tostring(payload_or_err))
+      goto continue
+    end
+    local parse_ok, found = pcall(baf.parse_frame_fields, payload_or_err)
+    if not parse_ok then
+      log.warn("BAF query_multi: dropping malformed frame (parse_frame_fields failed): " .. tostring(found))
+      goto continue
+    end
     if found then
       for category_name in pairs(wanted) do
         for field_name, value in pairs(found) do
@@ -190,6 +209,7 @@ function BafClient.query_multi(ip, category_names, timeout_sec)
         end
       end
     end
+    ::continue::
   end
 
   sock:close()

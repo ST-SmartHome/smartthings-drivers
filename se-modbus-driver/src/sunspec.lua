@@ -27,17 +27,28 @@ local MAX_MODELS_TO_SCAN = 20 -- safety bound, a real device has a handful
 --- Returns the wire address of the given model's DATA (i.e. right after its
 --- 2-register header), and its declared length, or nil + error.
 --- `target_model_ids` is a set-like table, e.g. { [101]=true, [102]=true, [103]=true }.
-function SunSpec.find_model(client, target_model_ids)
-  local header, err = client:read_holding_registers(0, 2)
-  if not header then
-    return nil, "failed reading SunSpec identifier: " .. tostring(err)
-  end
-  if header[1] ~= SUNS_HI or header[2] ~= SUNS_LO then
-    return nil, string.format("no SunSpec 'SunS' identifier at register 0 (got 0x%04X 0x%04X) — this device may not be SunSpec-compliant at this address, or uses a non-default base",
-      header[1], header[2])
+--- `resume_addr`, if given, skips the "SunS" identifier re-check and the
+--- header rescan and starts walking directly from that wire address
+--- instead -- pass a previous call's `model_addr + model_length` (the
+--- wire address right after the model you already found) to continue the
+--- SAME chain walk instead of re-reading the identifier and every earlier
+--- model's header again. Omit for the first walk of a connection.
+function SunSpec.find_model(client, target_model_ids, resume_addr)
+  local addr
+  if resume_addr then
+    addr = resume_addr
+  else
+    local header, err = client:read_holding_registers(0, 2)
+    if not header then
+      return nil, "failed reading SunSpec identifier: " .. tostring(err)
+    end
+    if header[1] ~= SUNS_HI or header[2] ~= SUNS_LO then
+      return nil, string.format("no SunSpec 'SunS' identifier at register 0 (got 0x%04X 0x%04X) — this device may not be SunSpec-compliant at this address, or uses a non-default base",
+        header[1], header[2])
+    end
+    addr = 2
   end
 
-  local addr = 2
   for _ = 1, MAX_MODELS_TO_SCAN do
     local model_header, mh_err = client:read_holding_registers(addr, 2)
     if not model_header then

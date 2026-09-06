@@ -72,6 +72,22 @@ function Modbus:read_holding_registers(start_addr, quantity)
   end
 
   local byte_count = string.byte(pdu, 2)
+  -- byte_count is a value the response itself claims, not something
+  -- already verified against what was actually received -- on a
+  -- malformed/truncated response (or a byte_count/length mismatch from a
+  -- misbehaving gateway) the loop below would index past the end of pdu,
+  -- and string.byte returns nil for an out-of-range index, which then
+  -- throws inside u16's bitwise shift ("attempt to perform bitwise
+  -- operation on a nil value") -- an unhelpful crash instead of a clean
+  -- error. Validate both the parity (registers are always 2 bytes) and
+  -- the actual length before trusting it.
+  if byte_count % 2 ~= 0 then
+    return nil, "odd byte_count " .. tostring(byte_count) .. " in Modbus response (registers are 2 bytes each)"
+  end
+  if #pdu ~= 2 + byte_count then
+    return nil, "Modbus response byte_count (" .. tostring(byte_count) ..
+      ") doesn't match actual received PDU length (" .. tostring(#pdu - 2) .. " data bytes)"
+  end
   local registers = {}
   for i = 1, byte_count / 2 do
     local offset = 3 + (i - 1) * 2
