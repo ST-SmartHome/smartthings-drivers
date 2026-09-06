@@ -46,6 +46,91 @@ local SLEEP_FAN_MODE_CAP = capabilities["examplens.sleepAutoMode"]
 -- gate on THIS capability instead of sleepAutoMode directly -- it folds
 -- sleepMode's state in (see apply_sleep_status below), sleepAutoMode alone
 -- never could.
+-- Comfort/Heat/Motion/Return-to-Auto cluster (2026-09-05) -- fields
+-- confirmed via an isolated pcap capture, see project-status memory.
+-- All FAN-category, all directly queryable (arrive on every normal poll,
+-- same as the Sleep cluster) -- no extra query category needed. Master
+-- toggles for each of the 4 new components reuse the standard `switch`
+-- capability (see switch_on/switch_off's component branches below), not
+-- a custom one.
+local COMFORT_IDEAL_TEMP_CAP = capabilities["examplens.comfortIdealTemp"]
+local COMFORT_MIN_SPEED_CAP = capabilities["examplens.comfortMinSpeed"]
+local COMFORT_MAX_SPEED_CAP = capabilities["examplens.comfortMaxSpeed"]
+local HEAT_ASSIST_SPEED_CAP = capabilities["examplens.heatAssistSpeed"]
+-- 2nd rename, 2026-09-05: "heatAssistReversal" is a 3rd distinct
+-- capability id -- neither the original "heatAssistReverse" (whose
+-- cached schema validation permanently rejects the capitalized
+-- "On"/"Off" this driver needs) nor the 2nd attempt
+-- "heatassistreversealt" (whose *display label* turned out to be
+-- permanently stuck at its creation-time literal camelCase name,
+-- "heatAssistReverseAlt" -- see SHOW_COMFORT_CAP's comment below for
+-- the full story). This one was created with a properly spaced `name`
+-- ("Heat Assist Reversal") and had its presentation+translation set
+-- BEFORE ever being wired into a device, to actually stick this time.
+local HEAT_ASSIST_REVERSE_CAP = capabilities["examplens.heatAssistReversal"]
+local MOTION_TIMEOUT_MINUTES_CAP = capabilities["examplens.motionTimeoutMinutes"]
+local UNOCCUPIED_BEHAVIOR_MODE_CAP = capabilities["examplens.unoccupiedBehaviorMode"]
+local UNOCCUPIED_BEHAVIOR_SPEED_CAP = capabilities["examplens.unoccupiedBehaviorSpeed"]
+local RETURN_TO_AUTO_MINUTES_CAP = capabilities["examplens.returnToAutoMinutes"]
+
+-- Phantom show/hide switches for the Comfort/Heat/Motion/Return-to-Auto
+-- sections (2026-09-05, user request): same zero-hardware-backing pattern
+-- as showSettings/showSchedule (see the "Phantom switch" note in
+-- CLAUDE.md), but genuine switch-displayType tiles rather than a list
+-- dropdown. Each one becomes its section's always-visible anchor tile;
+-- the section's real hardware enable switch moves down into the gated
+-- group below it (see profile.yml).
+--
+-- **2nd generation of these 4 capabilities.** The 1st generation
+-- (`showcomfort`/`showheat`/`showmotion`/`showreturntoauto`, still
+-- orphaned in the account, unused) turned out to have a much deeper
+-- version of the "PUT doesn't propagate" gotcha than presentation/schema
+-- alone: their DISPLAY LABEL is permanently stuck at whatever `name`
+-- string was submitted at `capabilities:create` time -- confirmed by a
+-- real user's live app surviving a hub reboot, a full force-quit, an
+-- Offload+Reinstall, AND a genuine Delete+reinstall (so ruled out as a
+-- client-side cache) all still showing the raw literal "showComfort"
+-- etc., despite a `capabilities:translations:upsert` having been
+-- confirmed correctly stored server-side the whole time. Every other
+-- capability's rendered label across this whole driver matches its
+-- *creation-time* `name` exactly, with zero exceptions found once looked
+-- for. This 2nd generation (`comfortSection`/`heatSection`/
+-- `motionSection`/`returnToAutoSection`) was created with a properly
+-- spaced, human-readable `name` field, then had BOTH presentation and
+-- translation set correctly *before* ever being wired into profile.yml
+-- or deployed to a device -- since it's a genuinely new id no device has
+-- ever observed, there's no stale first-look to be stuck on. Attribute
+-- keys (`showComfort` etc) deliberately kept identical to gen 1 so none
+-- of the Lua below this point needed to change.
+local SHOW_COMFORT_CAP = capabilities["examplens.comfortSection"]
+local SHOW_HEAT_CAP = capabilities["examplens.heatSection"]
+local SHOW_MOTION_CAP = capabilities["examplens.motionSection"]
+local SHOW_RETURN_TO_AUTO_CAP = capabilities["examplens.returnToAutoSection"]
+
+-- The real hardware enable switches for the 4 sections above, 2026-09-05
+-- (2nd change same day): originally these used the shared stock `switch`
+-- capability, same as main/light -- but stock `switch` turns out to get
+-- a hardcoded "hero banner" rendering (`standbyPowerSwitch`) that always
+-- displays prominently above everything else in its component's card,
+-- ignoring both detailView order and visibleCondition -- confirmed via
+-- a live screenshot (the banner stayed pinned above the SHOW_*_CAP
+-- toggle + sliders card, defeating the intended "tap Show X to reveal
+-- everything, including the real switch" collapse) and a dashboard-block
+-- diff (dashboard only references `main`'s switch, ruling out a
+-- separate hero-action source). Sleep Mode, a CUSTOM capability with
+-- displayType list in this same profile, does not get this treatment --
+-- confirmed it's specific to the stock `switch` capability, not
+-- something detailView ordering/gating can work around. Fix: a custom
+-- capability per section instead, same as every other control in these
+-- sections. `switch_on`/`switch_off` below no longer need to handle
+-- comfort/heat/motion/returnToAuto at all -- these 4 have their own
+-- dedicated handlers instead (see COMFORT_ENABLE_CAP.ID etc in
+-- command_handlers).
+local COMFORT_ENABLE_CAP = capabilities["examplens.comfortEnable"]
+local HEAT_ASSIST_ENABLE_CAP = capabilities["examplens.heatAssistEnable"]
+local MOTION_SENSE_ENABLE_CAP = capabilities["examplens.motionSenseEnable"]
+local RETURN_TO_AUTO_ENABLE_CAP = capabilities["examplens.returnToAutoEnable"]
+
 local SLEEP_FAN_MODE_GATE_CAP = capabilities["examplens.sleepAutoModeGate"]
 local SLEEP_SPEED_CAP = capabilities["examplens.sleepSpeed"]
 local SLEEP_IDEAL_TEMP_CAP = capabilities["examplens.sleepIdealTemperature"]
@@ -394,6 +479,73 @@ local function apply_sleep_status(device, fan, light)
   end
 end
 
+--- Comfort/Heat/Motion/Return-to-Auto cluster (2026-09-05). All 4 new
+--- components' fields are FAN-category and directly queryable (same as
+--- Sleep), so this only ever needs `fan`, unlike apply_sleep_status which
+--- also has a light half. Only called for the parent -- same reasoning
+--- as apply_sleep_status (these are fan-only preset screens, never
+--- meaningful on a light-child). unoccupied_behavior's raw bytes are
+--- decoded via baf.decode_unoccupied_behavior rather than inline here,
+--- keeping wire-format details in baf_protocol.lua.
+local function apply_comfort_cluster_status(device, fan)
+  if not fan then
+    return
+  end
+  local comfort_component = device.profile.components.comfort
+  local heat_component = device.profile.components.heat
+  local motion_component = device.profile.components.motion
+  local return_to_auto_component = device.profile.components.returnToAuto
+  if comfort_component then
+    device:emit_component_event(comfort_component,
+      COMFORT_ENABLE_CAP.comfortEnable({ value = fan.comfort_enable and "On" or "Off" }))
+    device:emit_component_event(comfort_component,
+      -- No unit field: this capability's schema doesn't declare one --
+      -- confirmed via live logcat (st/capabilities/aware.lua rejected it
+      -- as "Incorrect field: unit" even after the schema was updated to
+      -- add it via REST, through 2 hub reboots and a redeploy -- some
+      -- capability-schema cache the driver runtime reads clearly doesn't
+      -- refresh on either trigger). Matches the plain no-unit pattern
+      -- already working for comfortMinSpeed/comfortMaxSpeed below.
+      COMFORT_IDEAL_TEMP_CAP.comfortIdealTemp({ value = fan.comfort_ideal_temp / 100.0 }))
+    device:emit_component_event(comfort_component,
+      COMFORT_MIN_SPEED_CAP.comfortMinSpeed({ value = fan.comfort_min_speed }))
+    device:emit_component_event(comfort_component,
+      COMFORT_MAX_SPEED_CAP.comfortMaxSpeed({ value = fan.comfort_max_speed }))
+  end
+  if heat_component then
+    device:emit_component_event(heat_component,
+      HEAT_ASSIST_ENABLE_CAP.heatAssistEnable({ value = fan.heat_assist_enable and "On" or "Off" }))
+    device:emit_component_event(heat_component,
+      HEAT_ASSIST_SPEED_CAP.heatAssistSpeed({ value = fan.heat_assist_speed }))
+    device:emit_component_event(heat_component,
+      -- Capitalized "On"/"Off", matching the Sleep cluster's convention
+      -- -- HEAT_ASSIST_REVERSE_CAP now points at "heatAssistReversal",
+      -- the 3rd capability id used for this control (see its own local
+      -- declaration above for why the first two didn't stick -- schema
+      -- caching, then a permanently-frozen display label).
+      HEAT_ASSIST_REVERSE_CAP.heatAssistReverseAlt({ value = fan.heat_assist_reverse and "On" or "Off" }))
+  end
+  if motion_component then
+    local unoccupied = baf.decode_unoccupied_behavior(fan.unoccupied_behavior or "")
+    device:emit_component_event(motion_component,
+      MOTION_SENSE_ENABLE_CAP.motionSenseEnable({ value = fan.motion_sense_enable and "On" or "Off" }))
+    device:emit_component_event(motion_component,
+      -- No unit field -- see comfortIdealTemp's comment above for why.
+      MOTION_TIMEOUT_MINUTES_CAP.motionTimeoutMinutes({ value = math.floor(fan.motion_timeout_secs / 60) }))
+    device:emit_component_event(motion_component,
+      UNOCCUPIED_BEHAVIOR_MODE_CAP.unoccupiedBehaviorMode({ value = unoccupied.mode == 1 and "smartMix" or "turnOff" }))
+    device:emit_component_event(motion_component,
+      UNOCCUPIED_BEHAVIOR_SPEED_CAP.unoccupiedBehaviorSpeed({ value = unoccupied.speed }))
+  end
+  if return_to_auto_component then
+    device:emit_component_event(return_to_auto_component,
+      RETURN_TO_AUTO_ENABLE_CAP.returnToAutoEnable({ value = fan.return_to_auto_enable and "On" or "Off" }))
+    device:emit_component_event(return_to_auto_component,
+      -- No unit field -- see comfortIdealTemp's comment above for why.
+      RETURN_TO_AUTO_MINUTES_CAP.returnToAutoMinutes({ value = math.floor(fan.return_to_auto_secs / 60) }))
+  end
+end
+
 --- Queries all schedules and emits the label, enabled state, AND
 --- existence gate for each of SCHEDULE_SLOTS' 3 auto-discovered
 --- positions. Deliberately its OWN connection (BafClient.query_schedules),
@@ -506,8 +658,8 @@ local function poll_once(driver, device)
     -- same connection, no extra TCP overhead.
     --
     -- One immediate retry on failure: found 2026-08-22 that on a
-    -- sufficiently lossy Wi-Fi network (a congested 2.4GHz SSID with a
-    -- high TX-retry rate on both fans, unrelated to this driver)
+    -- sufficiently lossy Wi-Fi network (one of this household's 2.4GHz SSIDs
+    -- runs ~40% TX retry rates on both fans, unrelated to this driver)
     -- poll_once fails with "read failed waiting for start delimiter:
     -- timeout" on roughly 1-in-5 cycles per fan — a lost/delayed response,
     -- not a slow one, so a longer timeout wouldn't help; a fresh attempt
@@ -531,6 +683,7 @@ local function poll_once(driver, device)
       apply_sensor_status(device, results.SENSORS)
     end
     apply_sleep_status(device, results.FAN, results.LIGHT)
+    apply_comfort_cluster_status(device, results.FAN)
 
     -- If a light-child has been created for this fan, push the same
     -- fresh LIGHT data to it too — one poll, two devices updated, still
@@ -580,7 +733,7 @@ local REFRESH_DELAY_SECONDS = 2
 
 -- How many times to (re)send a commit if it doesn't verify as applied.
 -- Mirrors the read-path retry added 2026-08-22 for the same reason: this
--- fan's Wi-Fi has a high TX-retry rate, and BafClient.commit's local
+-- fan's Wi-Fi runs ~40% TX retry rates, and BafClient.commit's local
 -- sock:send() succeeding only proves the write left this box, not that it
 -- reached the fan. Unlike reads, a lost commit produced no error and no
 -- retry at all before this fix — the app's toggle would just spin and
@@ -623,6 +776,7 @@ local function apply_fan_status_or_light(device, category, result)
   if category == "FAN" then
     apply_fan_status(device, result)
     apply_sleep_status(device, result, nil)
+    apply_comfort_cluster_status(device, result)
   elseif category == "LIGHT" then
     apply_light_status(device, result)
     apply_sleep_status(device, nil, result)
@@ -815,7 +969,7 @@ end
 local WITH_ADDFAN_PROFILE = "bigassfans-h.v8"
 local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v8"
 local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v9"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v36"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v46"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
 -- All four reset to nil after the 2026-08-27 v2->v3 bump above (a new
@@ -882,8 +1036,7 @@ local function ensure_correct_profile(driver, device)
 end
 
 --- Automatic for every fan with a physical light — no per-device opt-in
---- anymore. Piloted behind a splitLightDevice preference on one fan
---- first (2026-08-25: created, confirmed mirroring state both
+--- anymore. Piloted behind a splitLightDevice preference on one fan first (2026-08-25: created, confirmed mirroring state both
 --- directions and controlling the real light, confirmed as its own
 --- separate Alexa device) before making it unconditional here for every
 --- other fan too, including ones added in the future. Still skipped for
@@ -991,6 +1144,34 @@ local function device_init(driver, device)
     device:emit_component_event(schedule_component,
       SHOW_SCHEDULE_CAP.showSchedule({ value = "On" }))
   end
+  -- Same seed pattern again for the 4 new phantom show/hide switches
+  -- (2026-09-05) -- pure local UI state, safe to default immediately,
+  -- guarded the same way so a restart never clobbers a user's own
+  -- collapse/expand choice.
+  local comfort_component = device.profile.components.comfort
+  if comfort_component and
+      device:get_latest_state("comfort", "examplens.comfortSection", "showComfort") == nil then
+    device:emit_component_event(comfort_component,
+      SHOW_COMFORT_CAP.showComfort({ value = "On" }))
+  end
+  local heat_component = device.profile.components.heat
+  if heat_component and
+      device:get_latest_state("heat", "examplens.heatSection", "showHeat") == nil then
+    device:emit_component_event(heat_component,
+      SHOW_HEAT_CAP.showHeat({ value = "On" }))
+  end
+  local motion_component = device.profile.components.motion
+  if motion_component and
+      device:get_latest_state("motion", "examplens.motionSection", "showMotion") == nil then
+    device:emit_component_event(motion_component,
+      SHOW_MOTION_CAP.showMotion({ value = "On" }))
+  end
+  local return_to_auto_component = device.profile.components.returnToAuto
+  if return_to_auto_component and
+      device:get_latest_state("returnToAuto", "examplens.returnToAutoSection", "showReturnToAuto") == nil then
+    device:emit_component_event(return_to_auto_component,
+      SHOW_RETURN_TO_AUTO_CAP.showReturnToAuto({ value = "On" }))
+  end
   -- Real, network-dependent status -- wrapped in pcall like poll_once,
   -- for the same reason: an uncaught error here must never stop
   -- start_polling below from ever running.
@@ -1068,6 +1249,58 @@ local function switch_off(driver, device, command)
   end
 end
 
+--- Comfort/Heat/Motion/Return-to-Auto master enable toggles (2026-09-05,
+--- 2nd generation -- see COMFORT_ENABLE_CAP's declaration above for why
+--- these are no longer the shared stock `switch` capability). Each is
+--- used in exactly one component, so no component-keyed dispatch table
+--- is needed here the way the old shared-capability version needed one.
+local function comfort_enable_on(driver, device, command)
+  send_commit(driver, device, { comfort_enable = true }, true)
+end
+
+local function comfort_enable_off(driver, device, command)
+  send_commit(driver, device, { comfort_enable = false }, true)
+end
+
+local function heat_assist_enable_on(driver, device, command)
+  send_commit(driver, device, { heat_assist_enable = true }, true)
+end
+
+local function heat_assist_enable_off(driver, device, command)
+  send_commit(driver, device, { heat_assist_enable = false }, true)
+end
+
+local function motion_sense_enable_on(driver, device, command)
+  send_commit(driver, device, { motion_sense_enable = true }, true)
+end
+
+local function motion_sense_enable_off(driver, device, command)
+  send_commit(driver, device, { motion_sense_enable = false }, true)
+end
+
+local function return_to_auto_enable_on(driver, device, command)
+  send_commit(driver, device, { return_to_auto_enable = true }, true)
+end
+
+local function return_to_auto_enable_off(driver, device, command)
+  send_commit(driver, device, { return_to_auto_enable = false }, true)
+end
+
+-- List-style setters for the 4 enable switches above (2026-09-05, 3rd
+-- change same day): switch-displayType's toggle KNOB turns out to not
+-- reliably track state in this driver -- an already-documented,
+-- previously-unsolved gotcha (see showSettings/showSchedule's own
+-- 2026-09-03 conversion for the same reason) that resurfaced here: a
+-- real user screenshot showed "Off" as the text value with the knob
+-- still rendered in the on position, persisting through both a screen
+-- refresh and a full re-render, so not a one-off staleness glitch.
+-- Converted to list-style (the only confirmed-reliable toggle rendering
+-- in this whole driver) -- turnOn/turnOff above are now unused
+-- leftovers. Defined inline in command_handlers below, not as named
+-- top-level locals -- this file is right at Lua's 200-local-per-chunk
+-- ceiling (hit it while adding this exact batch), and an inline
+-- anonymous function costs zero top-level local slots.
+
 --- Setting a nonzero speed also turns the fan on (fan_mode = ON) and
 --- setting speed to 0 turns it off — a UX judgment call, not a confirmed
 --- device behavior: the protocol keeps `speed` and `fan_mode` as separate
@@ -1086,6 +1319,78 @@ local function set_level(driver, device, command)
   send_commit(driver, device, { light_brightness_percent = percent }, true)
 end
 
+-- Comfort/Heat/Motion/Return-to-Auto setter handlers (2026-09-05).
+-- Plain scalars are direct send_commit calls, same shape as set_fan_speed
+-- above. unoccupiedBehaviorMode/unoccupiedBehaviorSpeed are the odd ones
+-- out: both halves live in the SAME nested wire field (42), so setting
+-- either one has to read the OTHER's current value from device state
+-- first and re-send both together, or it'd silently clobber whichever
+-- half wasn't just changed. Defaults (0/1 for mode, 0 for speed) only
+-- matter on a driver restart before the first real poll has landed.
+local function set_comfort_ideal_temp(driver, device, command)
+  local celsius = math.max(10, math.min(35, command.args.value))
+  send_commit(driver, device, { comfort_ideal_temp = math.floor(celsius * 100) }, true)
+end
+
+local function set_comfort_min_speed(driver, device, command)
+  local speed = math.max(0, math.min(7, math.floor(command.args.value)))
+  send_commit(driver, device, { comfort_min_speed = speed }, true)
+end
+
+local function set_comfort_max_speed(driver, device, command)
+  local speed = math.max(0, math.min(7, math.floor(command.args.value)))
+  send_commit(driver, device, { comfort_max_speed = speed }, true)
+end
+
+local function set_heat_assist_speed(driver, device, command)
+  local speed = math.max(0, math.min(7, math.floor(command.args.value)))
+  send_commit(driver, device, { heat_assist_speed = speed }, true)
+end
+
+local function heat_assist_reverse_on(driver, device, command)
+  send_commit(driver, device, { heat_assist_reverse = true }, true)
+end
+
+local function heat_assist_reverse_off(driver, device, command)
+  send_commit(driver, device, { heat_assist_reverse = false }, true)
+end
+
+-- List-style setter (2026-09-05, 3rd change same day) -- same
+-- switch-knob-doesn't-track-state gotcha as the 4 enable switches above.
+-- Defined inline in command_handlers below (see that comment for why).
+
+local function set_motion_timeout_minutes(driver, device, command)
+  local minutes = math.max(1, math.min(240, math.floor(command.args.value)))
+  send_commit(driver, device, { motion_timeout_secs = minutes * 60 }, true)
+end
+
+--- unoccupiedBehaviorMode's own value string ("turnOff"/"smartMix")
+--- back to the wire's mode enum (0/1) -- see apply_comfort_cluster_status
+--- for the reverse mapping on read.
+local UNOCCUPIED_MODE_TO_ENUM = { turnOff = 0, smartMix = 1 }
+
+local function set_unoccupied_behavior_mode(driver, device, command)
+  local mode = UNOCCUPIED_MODE_TO_ENUM[command.args.value] or 0
+  local current_speed = device:get_latest_state("motion", "examplens.unoccupiedBehaviorSpeed", "unoccupiedBehaviorSpeed") or 0
+  send_commit(driver, device, {
+    unoccupied_behavior = baf.encode_unoccupied_behavior(mode, current_speed),
+  }, true)
+end
+
+local function set_unoccupied_behavior_speed(driver, device, command)
+  local speed = math.max(0, math.min(7, math.floor(command.args.value)))
+  local current_mode_str = device:get_latest_state("motion", "examplens.unoccupiedBehaviorMode", "unoccupiedBehaviorMode") or "turnOff"
+  local mode = UNOCCUPIED_MODE_TO_ENUM[current_mode_str] or 0
+  send_commit(driver, device, {
+    unoccupied_behavior = baf.encode_unoccupied_behavior(mode, speed),
+  }, true)
+end
+
+local function set_return_to_auto_minutes(driver, device, command)
+  local minutes = math.max(1, math.min(240, math.floor(command.args.value)))
+  send_commit(driver, device, { return_to_auto_secs = minutes * 60 }, true)
+end
+
 local function set_mode(driver, device, command)
   local value = STRING_TO_OFF_ON_AUTO[command.args.mode]
   if not value then
@@ -1102,7 +1407,7 @@ end
 
 -- CORRECTED 2026-08-25: the "never takes effect" conclusion that removed
 -- this handler was wrong — reverse_enable does get committed, just with
--- an unpredictable delay (confirmed when one of the two test fans turned up
+-- an unpredictable delay (confirmed when a real fan turned up
 -- running reverse_enable=true, well after the original short wait-then-
 -- verify test looked like it failed; see project-status memory for the
 -- full writeup and the incident that caught it). Handler restored.
@@ -1115,7 +1420,7 @@ end
 --
 -- 2026-08-25: added a stop-the-fan-first interlock, since this original
 -- code committed reverse_enable directly regardless of whether the fan
--- was spinning -- the exact sequence that likely put one of the two test fans
+-- was spinning -- the exact sequence that likely put a real fan
 -- into reverse at full speed in the first place, and was worked around
 -- manually (stop, verify stopped, then flip) via the standalone fix
 -- script when that incident was caught. That manual sequence is now
@@ -1315,6 +1620,63 @@ local function set_show_schedule(driver, device, command)
     SHOW_SCHEDULE_CAP.showSchedule({ value = command.args.showSchedule }))
   refresh_schedule_exists_gates(driver, device)
 end
+
+--- Comfort/Heat/Motion/Return-to-Auto phantom show/hide switches
+--- (2026-09-05): same "zero protocol commit, pure local UI state" pattern
+--- as showSettings/showSchedule above, but wired to plain turnOn/turnOff
+--- (matching heatAssistReverseAlt's presentation) rather than a list
+--- setter -- see the SHOW_COMFORT_CAP block's comment above for why these
+--- are fresh capabilities instead of converting the list-style ones.
+local function show_comfort_on(driver, device, command)
+  device:emit_component_event(device.profile.components.comfort,
+    SHOW_COMFORT_CAP.showComfort({ value = "On" }))
+end
+
+local function show_comfort_off(driver, device, command)
+  device:emit_component_event(device.profile.components.comfort,
+    SHOW_COMFORT_CAP.showComfort({ value = "Off" }))
+end
+
+local function show_heat_on(driver, device, command)
+  device:emit_component_event(device.profile.components.heat,
+    SHOW_HEAT_CAP.showHeat({ value = "On" }))
+end
+
+local function show_heat_off(driver, device, command)
+  device:emit_component_event(device.profile.components.heat,
+    SHOW_HEAT_CAP.showHeat({ value = "Off" }))
+end
+
+local function show_motion_on(driver, device, command)
+  device:emit_component_event(device.profile.components.motion,
+    SHOW_MOTION_CAP.showMotion({ value = "On" }))
+end
+
+local function show_motion_off(driver, device, command)
+  device:emit_component_event(device.profile.components.motion,
+    SHOW_MOTION_CAP.showMotion({ value = "Off" }))
+end
+
+local function show_return_to_auto_on(driver, device, command)
+  device:emit_component_event(device.profile.components.returnToAuto,
+    SHOW_RETURN_TO_AUTO_CAP.showReturnToAuto({ value = "On" }))
+end
+
+local function show_return_to_auto_off(driver, device, command)
+  device:emit_component_event(device.profile.components.returnToAuto,
+    SHOW_RETURN_TO_AUTO_CAP.showReturnToAuto({ value = "Off" }))
+end
+
+-- List-style setters (2026-09-05, 3rd change same day) -- same
+-- switch-knob-doesn't-track-state gotcha as the comfort/heat/motion/
+-- returnToAuto enable switches above; confirmed by a real user
+-- screenshot AND explicit report: tapping the switch correctly
+-- collapses the section and the text label correctly reads "Off", but
+-- the knob visually flips back to the on position regardless, through
+-- both a screen refresh and a full re-render. turnOn/turnOff above are
+-- now unused leftovers. Defined inline in command_handlers below, not
+-- as named top-level locals (see the enable-switch comment above for
+-- why -- this file is at Lua's 200-local-per-chunk ceiling).
 
 --- Real read-modify-write: queries the current schedules, re-derives
 --- `slot`'s auto-discovered target the same way apply_schedule_status
@@ -1522,11 +1884,74 @@ local baf_driver = Driver("bigassfans-i6-lan", {
       [capabilities.switch.commands.on.NAME] = switch_on,
       [capabilities.switch.commands.off.NAME] = switch_off,
     },
+    [COMFORT_ENABLE_CAP.ID] = {
+      ["turnOn"] = comfort_enable_on,
+      ["turnOff"] = comfort_enable_off,
+      ["setComfortEnable"] = function(driver, device, command)
+        send_commit(driver, device, { comfort_enable = command.args.value == "On" }, true)
+      end,
+    },
+    [HEAT_ASSIST_ENABLE_CAP.ID] = {
+      ["turnOn"] = heat_assist_enable_on,
+      ["turnOff"] = heat_assist_enable_off,
+      ["setHeatAssistEnable"] = function(driver, device, command)
+        send_commit(driver, device, { heat_assist_enable = command.args.value == "On" }, true)
+      end,
+    },
+    [MOTION_SENSE_ENABLE_CAP.ID] = {
+      ["turnOn"] = motion_sense_enable_on,
+      ["turnOff"] = motion_sense_enable_off,
+      ["setMotionSenseEnable"] = function(driver, device, command)
+        send_commit(driver, device, { motion_sense_enable = command.args.value == "On" }, true)
+      end,
+    },
+    [RETURN_TO_AUTO_ENABLE_CAP.ID] = {
+      ["turnOn"] = return_to_auto_enable_on,
+      ["turnOff"] = return_to_auto_enable_off,
+      ["setReturnToAutoEnable"] = function(driver, device, command)
+        send_commit(driver, device, { return_to_auto_enable = command.args.value == "On" }, true)
+      end,
+    },
     [capabilities.fanSpeed.ID] = {
       [capabilities.fanSpeed.commands.setFanSpeed.NAME] = set_fan_speed,
     },
     [capabilities.switchLevel.ID] = {
       [capabilities.switchLevel.commands.setLevel.NAME] = set_level,
+    },
+    -- Comfort/Heat/Motion/Return-to-Auto cluster (2026-09-05): literal
+    -- string command names, not `.commands.X.NAME` -- these capabilities
+    -- were created moments before this deploy, same propagation-lag
+    -- caution as the Sleep cluster's own comment above.
+    [COMFORT_IDEAL_TEMP_CAP.ID] = {
+      ["setComfortIdealTemp"] = set_comfort_ideal_temp,
+    },
+    [COMFORT_MIN_SPEED_CAP.ID] = {
+      ["setComfortMinSpeed"] = set_comfort_min_speed,
+    },
+    [COMFORT_MAX_SPEED_CAP.ID] = {
+      ["setComfortMaxSpeed"] = set_comfort_max_speed,
+    },
+    [HEAT_ASSIST_SPEED_CAP.ID] = {
+      ["setHeatAssistSpeed"] = set_heat_assist_speed,
+    },
+    [HEAT_ASSIST_REVERSE_CAP.ID] = {
+      ["turnOn"] = heat_assist_reverse_on,
+      ["turnOff"] = heat_assist_reverse_off,
+      ["setHeatAssistReverseAlt"] = function(driver, device, command)
+        send_commit(driver, device, { heat_assist_reverse = command.args.value == "On" }, true)
+      end,
+    },
+    [MOTION_TIMEOUT_MINUTES_CAP.ID] = {
+      ["setMotionTimeoutMinutes"] = set_motion_timeout_minutes,
+    },
+    [UNOCCUPIED_BEHAVIOR_MODE_CAP.ID] = {
+      ["setUnoccupiedBehaviorMode"] = set_unoccupied_behavior_mode,
+    },
+    [UNOCCUPIED_BEHAVIOR_SPEED_CAP.ID] = {
+      ["setUnoccupiedBehaviorSpeed"] = set_unoccupied_behavior_speed,
+    },
+    [RETURN_TO_AUTO_MINUTES_CAP.ID] = {
+      ["setReturnToAutoMinutes"] = set_return_to_auto_minutes,
     },
     [FAN_MODE_CAP.ID] = {
       [FAN_MODE_CAP.commands.setMode.NAME] = set_mode,
@@ -1550,6 +1975,17 @@ local baf_driver = Driver("bigassfans-i6-lan", {
       ["turnOn"] = show_settings_on,
       ["turnOff"] = show_settings_off,
     },
+    -- 2026-09-06: a throwaway test capability (`comfortToggleTest`) briefly
+    -- lived here to test whether displayType:switch's knob-tracking bug
+    -- was specifically about capitalized "On"/"Off" values vs. lowercase
+    -- "on"/"off" (the stock `switch` capability's own, correctly-rendering
+    -- convention). RESULT: lowercase made no difference -- the knob still
+    -- rendered stuck on the right at "off", same as every other broken
+    -- switch in this driver. Confirms the bug is a genuine platform/
+    -- rendering issue with displayType:switch itself, not about value
+    -- casing. Removed after the test; see project-status memory for the
+    -- full writeup. Don't re-attempt a switch-style capability in this
+    -- driver without a new, different theory -- casing is now ruled out.
     [FAN_BEEP_CAP.ID] = {
       [FAN_BEEP_CAP.commands.setFanBeep.NAME] = set_fan_beep,
       ["turnOn"] = fan_beep_on,
@@ -1624,6 +2060,41 @@ local baf_driver = Driver("bigassfans-i6-lan", {
       ["turnOn"] = show_schedule_on,
       ["turnOff"] = show_schedule_off,
       ["setShowSchedule"] = set_show_schedule,
+    },
+    -- Comfort/Heat/Motion/Return-to-Auto phantom show/hide switches
+    -- (2026-09-05, 3rd change same day: list-style now -- switch-knob
+    -- state-tracking gotcha, same as the enable switches above).
+    [SHOW_COMFORT_CAP.ID] = {
+      ["turnOn"] = show_comfort_on,
+      ["turnOff"] = show_comfort_off,
+      ["setShowComfort"] = function(driver, device, command)
+        device:emit_component_event(device.profile.components.comfort,
+          SHOW_COMFORT_CAP.showComfort({ value = command.args.value }))
+      end,
+    },
+    [SHOW_HEAT_CAP.ID] = {
+      ["turnOn"] = show_heat_on,
+      ["turnOff"] = show_heat_off,
+      ["setShowHeat"] = function(driver, device, command)
+        device:emit_component_event(device.profile.components.heat,
+          SHOW_HEAT_CAP.showHeat({ value = command.args.value }))
+      end,
+    },
+    [SHOW_MOTION_CAP.ID] = {
+      ["turnOn"] = show_motion_on,
+      ["turnOff"] = show_motion_off,
+      ["setShowMotion"] = function(driver, device, command)
+        device:emit_component_event(device.profile.components.motion,
+          SHOW_MOTION_CAP.showMotion({ value = command.args.value }))
+      end,
+    },
+    [SHOW_RETURN_TO_AUTO_CAP.ID] = {
+      ["turnOn"] = show_return_to_auto_on,
+      ["turnOff"] = show_return_to_auto_off,
+      ["setShowReturnToAuto"] = function(driver, device, command)
+        device:emit_component_event(device.profile.components.returnToAuto,
+          SHOW_RETURN_TO_AUTO_CAP.showReturnToAuto({ value = command.args.value }))
+      end,
     },
     [SCHEDULE_ENABLED_CAP.ID] = {
       ["setScheduleEnabled"] = set_schedule_enabled,

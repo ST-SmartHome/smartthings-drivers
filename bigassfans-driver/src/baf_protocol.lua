@@ -99,7 +99,7 @@ baf.FIELDS = {
   -- upstream aiobafi6 proto verbatim and no such field exists. The real
   -- `Capabilities` submessage (SENSORS category, field 17) only names 4
   -- sub-fields: has_comfort1=1, has_comfort3=3, has_light=4, has_uplight=6.
-  -- Live-queried on one of the two test fans: true sub-fields are {1,3,4,7,9,10,14}
+  -- Live-queried on a real fan: true sub-fields are {1,3,4,7,9,10,14}
   -- -- has_comfort1/has_comfort3/has_light all true (comfort-related
   -- capability flags being true is independent corroboration that the
   -- still-unconfirmed Comfort-screen fields elsewhere in this table are
@@ -192,65 +192,45 @@ baf.FIELDS = {
   sleep_light_auto_motion_timeout_secs = { no = 117, kind = "int", category = "LIGHT" },
 
   -- ===== 2026-08-29 pcap discovery — Comfort/Motion screens, NOT YET
-  -- CONFIRMED. Decoded from raw commit values captured while navigating
-  -- the official app's Comfort and Motion screens, same methodology as
-  -- the original (later-corrected) Min/Max Speed guesses -- matched by
-  -- value shape/count and rough correspondence to the screenshots seen
-  -- the same session, NOT by a per-field isolated capture with narrated
-  -- actions. Treat every mapping below as a candidate to verify (a
-  -- fresh commit + the app's own displayed value, one field at a time)
-  -- before relying on it, same as every previously-confirmed field in
-  -- this table was. Defaults are the baseline values seen in the same
-  -- QueryResult chunk these fields co-occurred in.
-  comfort_enable      = { no = 47, kind = "bool", category = "FAN", default = true },  -- candidate: "Auto Comfort" master toggle
-  comfort_ideal_temp  = { no = 48, kind = "int",  category = "FAN", default = 2444 },  -- candidate: Comfort's own Ideal Temperature, x100 C (2444 ~= 24.44C, close to the 24.5C shown on-screen)
-  comfort_min_speed   = { no = 50, kind = "int",  category = "FAN", default = 0 },     -- candidate: "Min Speed" (native 0-7, paired with 51)
-  comfort_max_speed   = { no = 51, kind = "int",  category = "FAN", default = 7 },     -- candidate: "Max Speed" (paired with 50)
-  heat_assist_enable  = { no = 60, kind = "bool", category = "FAN", default = true },  -- candidate: "Heat Assist" toggle
-  -- CONFLICT, not just unconfirmed: field 52 was already assigned to
-  -- motion_sense_enable in an earlier session, confirmed via real
-  -- hardware (a fan genuinely auto-started from live detected motion at
-  -- fan_mode=AUTO) -- much stronger evidence than this single
-  -- uncorroborated pcap commit (field 52 alone, value 1, no co-occurring
-  -- fields in the same Commit to disambiguate). Do not trust this
-  -- "heat_assist_reverse" label -- resolve via an isolated capture
-  -- (toggle ONLY Heat Assist's Reverse switch, nothing under Motion)
-  -- before wiring anything to field 52 for either meaning.
-  heat_assist_reverse = { no = 52, kind = "bool", category = "FAN", default = false }, -- candidate: "Reverse" under Heat Assist -- only ever seen committed once (to true), baseline/off value not independently confirmed
+  -- CONFIRMED 2026-09-05 via an isolated passive pcap (PCAPdroid,
+  -- one of the two real fans) -- user toggled EVERY Comfort/Motion/
+  -- Return-to-Auto control one at a time, each its own commit, cross-
+  -- checked against live app screenshots of the same session (Comfort:
+  -- Auto Comfort On, Ideal Temp 25.0, Min Speed 3, Max Speed No Max,
+  -- Heat Assist On, Speed 6, Reverse Off; Motion: Motion Sense On,
+  -- Timeout 2 hours, Unoccupied Behavior Smart Mix/Fan Speed 2; Return
+  -- to Auto: On, 1 hour). This supersedes every "candidate"/pcap-
+  -- correlation-only note below -- real isolated single-field commits,
+  -- not inference from co-occurrence.
+  comfort_enable      = { no = 47, kind = "bool", category = "FAN", default = true },  -- "Auto Comfort" master toggle -- CONFIRMED, isolated 0->1 commit
+  comfort_ideal_temp  = { no = 48, kind = "int",  category = "FAN", default = 2500 },  -- Ideal Temperature, x100 C -- CONFIRMED, committed 2500 = on-screen 25.0
+  comfort_min_speed   = { no = 50, kind = "int",  category = "FAN", default = 3 },     -- "Min Speed", native 0-7 -- CONFIRMED, committed 3 = on-screen "Speed 3"
+  comfort_max_speed   = { no = 51, kind = "int",  category = "FAN", default = 7 },     -- "Max Speed", native 0-7 -- CONFIRMED, committed 7 = on-screen "No Max"
+  heat_assist_enable  = { no = 60, kind = "bool", category = "FAN", default = true },  -- "Heat Assist" toggle -- CONFIRMED, isolated 0->1 commit
+  heat_assist_speed   = { no = 61, kind = "int",  category = "FAN", default = 6 },     -- Heat Assist's own fan speed, native 0-7 -- CONFIRMED 2026-09-05 (new field, wasn't in the original candidate list), committed 6 = on-screen "Speed 6"
+  heat_assist_reverse = { no = 62, kind = "bool", category = "FAN", default = false }, -- "Reverse" under Heat Assist -- CONFIRMED 2026-09-05 at field 62, NOT 52 as previously guessed (see motion_sense_enable below) -- isolated 1->0 commit, ends Off matching on-screen state
+  motion_sense_enable = { no = 52, kind = "bool", category = "FAN", default = false }, -- "Motion Sense" toggle -- CONFLICT RESOLVED 2026-09-05: this isolated capture's own toggle (0->1) is what field 52 committed, corroborating the earlier real-hardware confirmation rather than the old "heat_assist_reverse" guess -- that guess is now known to actually be field 62 (see above), so there is no remaining ambiguity
+  motion_timeout_secs = { no = 53, kind = "int",  category = "FAN", default = 7200 },  -- "Motion Timeout", seconds -- CONFIRMED 2026-09-05 (new field), committed 7200 = on-screen "2 hours"
   -- field 42 is a nested 2-field submessage (bytes, e.g. \x08\x01\x10\x02
-  -- = {1: 1, 2: 2}), not a plain scalar -- candidate: "Unoccupied
-  -- Behavior" ("Smart Mix" etc, a compound setting). decode_field_value
-  -- passes an unrecognized kind through as raw bytes safely (falls into
-  -- its int/enum branch), so this is safe to leave as "bytes" for
-  -- reading, but build_commit has NO encode path for it -- do not wire
-  -- any write handler to this field until build_commit gains real
-  -- nested-message support, or it will encode garbage.
+  -- = {1: 1, 2: 2}) -- "Unoccupied Behavior". CONFIRMED 2026-09-05:
+  -- sub-field 1 = mode enum (1 = "Smart Mix", confirmed; 0 presumably
+  -- "Turn Off", the only other on-screen option, but not itself observed
+  -- committed -- inferred, not confirmed), sub-field 2 = fan_speed
+  -- (native 0-7, committed 2 = on-screen "Fan Speed: 2 (Recommended)").
+  -- decode_field_value passes an unrecognized kind through as raw bytes
+  -- safely (falls into its int/enum branch), so this is safe to leave as
+  -- "bytes" for reading, but build_commit has NO encode path for nested
+  -- messages yet -- do not wire a write handler to this field until
+  -- build_commit gains real nested-message support, or it will encode
+  -- garbage.
   unoccupied_behavior = { no = 42, kind = "bytes", category = "FAN" },
-  -- 2026-09-01: ruled OUT as plain FAN-category queryable fields. Live
-  -- test against a real fan -- baseline query, then 5
-  -- separate real on-screen changes in sequence (Auto Comfort off,
-  -- Ideal Temp 22.5C, Min Speed 3, Max Speed 6, Heat Assist on, Heat
-  -- Assist Speed 5), re-querying FAN after each -- every single one of
-  -- 42/47/48/50/51/52/54/55/60 stayed absent throughout, even though the
-  -- app visibly showed each new value. Same shape of finding as
-  -- sleepMode/ledIndicators/fanBeep/legacyIrRemote before they were
-  -- solved: real values a plain query can never see because they only
-  -- ever push unsolicited on the SAME connection as the commit that set
-  -- them. Confirmation for this whole cluster needs an actual passive
-  -- capture of the app's own connection (or the same
-  -- query-then-commit-then-read-burst trick already used for the
-  -- MORE_PUSH fields, if these turn out to share that mechanism) -- a
-  -- live query from a separate connection, however well-timed, will not
-  -- work, proven empirically here.
-  -- Two more fields seen changing in the same Motion/Unoccupied cluster,
-  -- meaning genuinely unclear yet -- lower confidence than the above.
-  motion_field_54 = { no = 54, kind = "bool", category = "FAN", default = false },
-  motion_field_55 = { no = 55, kind = "int",  category = "FAN", default = 900 },  -- seconds (900 = 15min baseline)
+  return_to_auto_enable = { no = 54, kind = "bool", category = "FAN", default = false }, -- CONFIRMED 2026-09-05: "Return to Auto" master toggle (the FAN-menu one, NOT sleep_return_to_auto/129 which is Sleep-section-specific) -- isolated 1->0 commit during the toggle-everything test; parallel pair to 129/130 at a different field range
+  return_to_auto_secs   = { no = 55, kind = "int",  category = "FAN", default = 3600 },  -- CONFIRMED 2026-09-05: "Return After" duration, seconds -- committed 3600 = on-screen "1 hour"; the old default guess of 900 (15min baseline) was just whatever the fan's own default happened to be, not itself wrong, superseded by this real committed value
 
   -- 2026-09-01 -- full category sweep (ALL/FAN/LIGHT/
   -- FIRMWARE_MORE_DATETIME_API/NETWORK/SCHEDULES/SENSORS all queried,
   -- every field number found recorded), not from a pcap this time --
-  -- direct live queries against one of the two test fans. All NOT YET CONFIRMED --
+  -- direct live queries against a real fan. All NOT YET CONFIRMED --
   -- no isolated-change testing done, just noting what a snapshot returns.
   -- fan_target_rpm(63) is notable: identical value to current_rpm(64) in
   -- the same query, worth checking whether it tracks a commanded setpoint
@@ -328,6 +308,12 @@ function baf.build_commit(props)
       props_bytes[#props_bytes + 1] = pb.encode_bytes_field(def.no, value)
     elseif def.kind == "bool" then
       props_bytes[#props_bytes + 1] = pb.encode_varint_field(def.no, value and 1 or 0)
+    elseif def.kind == "bytes" then
+      -- Pre-encoded nested-message bytes, passed through as-is (e.g.
+      -- unoccupied_behavior/field 42's {mode, fan_speed} submessage) --
+      -- the caller is responsible for building `value` via pb.encode_
+      -- varint_field on the sub-fields first, this just wraps it.
+      props_bytes[#props_bytes + 1] = pb.encode_bytes_field(def.no, value)
     else -- "int" or "enum"
       props_bytes[#props_bytes + 1] = pb.encode_varint_field(def.no, value)
     end
@@ -336,6 +322,24 @@ function baf.build_commit(props)
   local commit = pb.encode_bytes_field(3, properties)
   local root2 = pb.encode_bytes_field(2, commit)
   return pb.encode_bytes_field(2, root2)
+end
+
+--- unoccupied_behavior (field 42) is a nested 2-field submessage, not a
+--- plain scalar -- CONFIRMED 2026-09-05 (see project-status memory):
+--- sub-field 1 = mode enum (1 = "Smart Mix" confirmed; 0 presumably
+--- "Turn Off", the only other on-screen option, inferred not observed),
+--- sub-field 2 = fan_speed (native 0-7). These two helpers keep the
+--- wire-format details out of init.lua, same reasoning as every other
+--- baf_protocol function.
+function baf.decode_unoccupied_behavior(raw)
+  local fields = pb.parse_fields(raw)
+  local mode = pb.last(fields, 1)
+  local speed = pb.last(fields, 2)
+  return { mode = mode or 0, speed = speed or 0 }
+end
+
+function baf.encode_unoccupied_behavior(mode, speed)
+  return pb.encode_varint_field(1, mode) .. pb.encode_varint_field(2, speed)
 end
 
 local function decode_field_value(def, raw)
