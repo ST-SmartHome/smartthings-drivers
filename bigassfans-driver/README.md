@@ -15,8 +15,12 @@ Both known fans (Haiku H/I Series, firmware 3.3.7, api_version 8) were
 auto-discovered via mDNS and are fully working: fan switch/speed/mode/
 direction/whoosh/eco, light switch/brightness (its own child device, for
 Alexa visibility), LED indicators/fan beep/legacy IR remote, temperature,
-a collapsible Sleep section, and a collapsible auto-discovered Schedule
-section.
+a collapsible Sleep section, 4 more collapsible sections (Comfort, Heat
+Assist, Motion, Return to Auto), and a collapsible auto-discovered
+Schedule section. Every collapsible section uses the same pattern: a
+phantom show/hide dropdown as the always-visible anchor, with the real
+fields (including the section's own enable/disable toggle) nested
+inside, gated on it.
 
 4 profile variants exist, auto-selected per-device from the
 `hideAddFan`/`noLight` preferences — in practice every real fan lands on
@@ -53,14 +57,28 @@ fan" management tile, or the pre-split light layout.
     (native 0–7 range, numeric slider labels, not a percentage),
     `refresh`, and custom `fanMode` (Off/On/Auto), `fanDirection`
     (Forward/Reverse), `whoosh`, `ecoMode`.
-  - `settings` — a phantom `showSettings` switch gating LED indicators,
-    fan beep, legacy IR remote, and temperature.
   - `sleep` — a master `sleepMode` switch gating every sub-field (auto
     mode, speed, timer, return-to-auto, brightness, wake-up) via
     `visibleCondition` and 4 headless "gate" capabilities. `sleepMode`
     stays first and ungated — a section's first `detailView` tile can
     never fully hide on this platform, so it's the anchor the rest hide
     behind.
+  - `comfort` / `heat` / `motion` / `returnToAuto` — 4 sections for the
+    official app's Auto Comfort/Heat Assist/Motion Sense/Return-to-Auto
+    screens (field mapping confirmed via an isolated passive packet
+    capture, not inferred from co-occurrence). Each is a phantom
+    show/hide dropdown gating everything else in that component,
+    including its own enable/disable toggle (a dedicated list-style
+    capability, not the stock `switch` — see Known open items). Sub-
+    fields: Comfort has ideal temperature plus min/max fan-speed
+    sliders; Heat Assist has its own fan-speed slider plus a Reverse
+    toggle; Motion has a timeout plus an Unoccupied Behavior mode
+    (Turn Off / Smart Mix, with its own fan speed for Smart Mix) encoded
+    as a 2-field nested protobuf submessage — the only field here needing
+    a real nested-message encoder; Return to Auto has just a duration.
+  - `settings` — a phantom `showSettings` dropdown gating LED indicators,
+    fan beep, legacy IR remote, and temperature. Sits directly above
+    `schedule`.
   - `schedule` — auto-discovers up to 5 *named* on-device schedules every
     poll (decoded via a real pcap, see `baf_protocol.lua`'s "Schedule
     write path" comment): sorted alphabetically and bound to slots 1–5,
@@ -133,15 +151,37 @@ directly against it.
 - Fields in real `FAN` responses but missing from the reference `.proto`
   are silently ignored.
 - mDNS reflection across VLANs is untested.
-- Comfort/Motion-detection fields (occupancy timeout, ideal-temperature
-  auto mode, min/max speed) were found via app pcap but aren't confirmed
-  via isolated captures or wired into any capability — one field (52)
-  has a live conflict between two candidate meanings, and this cluster
-  behaves like MORE_PUSH (invisible to a query from a separate
-  connection), so only a real passive capture can resolve it.
+- ~~Comfort/Motion-detection fields not confirmed / not wired into any
+  capability~~ — **shipped**: every field in this cluster is confirmed
+  via an isolated passive packet capture and live as its own
+  collapsible section (see Architecture). The earlier live conflict
+  (field 52 guessed for both `heat_assist_reverse` and
+  `motion_sense_enable`) is resolved: field 52 is really
+  `motion_sense_enable`, `heat_assist_reverse` is field 62. The
+  Unoccupied Behavior nested-submessage write path is built and
+  confirmed live too, not just read-only.
 - Schedule auto-discovery covers up to 5 *named* schedules only (see
   Architecture above for why 5, not an unbounded list) — full create/edit
   (day/time/action) and nameless (Bedtime/Wake-Up) schedules are unbuilt.
   Design for going further: `SCHEDULE_FEATURE_PLAN.md`.
+- This driver has no confirmed-working `displayType: switch` tile
+  anywhere — every custom toggle here (Schedule, Settings, and all 9 in
+  the newer Comfort/Heat/Motion/Return-to-Auto sections) renders as a
+  `list`-style dropdown instead, after a switch-style knob was found to
+  never reliably track state. Ruled out one open theory before settling
+  on dropdowns for good: an isolated test using the stock `switch`
+  capability's own lowercase `on`/`off` value convention (vs. this
+  driver's usual capitalized `On`/`Off`) showed the identical
+  stuck-knob bug, so it isn't about value casing — it's a genuine
+  platform rendering defect, and dropdowns aren't a workaround, they're
+  the only reliable option.
+- A capability's rendered label is frozen permanently at
+  `capabilities:create` time from whatever name was submitted — no
+  later presentation/translation edit has ever been observed to change
+  it. A component's first `detailView` tile also always renders as a
+  prominent banner regardless of capability type. Both shaped this
+  driver's collapsible-section design: a phantom show/hide dropdown
+  always occupies the first slot (it's fine to be a banner, since it's
+  always visible anyway), with the real enable toggle second.
 - Fan-speed slider shows plain numeric labels (0–7) — no established
   naming convention for an 8-speed fan exists yet.
