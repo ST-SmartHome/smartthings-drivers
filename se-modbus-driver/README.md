@@ -1,4 +1,4 @@
-# se-modbus-lan
+# se-modbus-tcp
 
 LAN Edge Driver for a SolarEdge inverter, controlling it over local Modbus
 TCP (SunSpec) rather than through SolarEdge's cloud API — no cloud
