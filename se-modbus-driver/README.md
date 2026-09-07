@@ -3,7 +3,8 @@
 LAN Edge Driver for a SolarEdge inverter, controlling it over local Modbus
 TCP (SunSpec) rather than through SolarEdge's cloud API — no cloud
 dependency once set up. Distributed via a SmartThings channel invite
-(see the Community thread below).
+(see the Community thread below). Registered on the platform as
+`se-modbus-v4` — an old, unrenameable driver id, not the current version.
 
 **Discovery**: the inverter's Modbus TCP service is passive with no
 broadcast/SSDP of its own, so discovery doesn't gate on any network
