@@ -7,8 +7,8 @@ local SolarEdge = require "solaredge"
 
 local POLL_TIMER_FIELD = "poll_timer"
 local POLL_IN_PROGRESS_FIELD = "poll_in_progress"
-local STATUS_CAP = capabilities["examplens.inverterStatus"]
-local GRID_ENERGY_CAP = capabilities["examplens.gridEnergy"]
+local STATUS_CAP = capabilities["inverterStatus"]
+local GRID_ENERGY_CAP = capabilities["gridEnergy"]
 
 local function get_settings(device)
   local prefs = device.preferences or {}

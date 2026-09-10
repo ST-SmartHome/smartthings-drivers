@@ -9,7 +9,7 @@ components:
         version: 1
       - id: temperatureMeasurement
         version: 1
-      - id: examplens.inverterStatus
+      - id: inverterStatus
         version: 1
       - id: refresh
         version: 1
@@ -20,7 +20,7 @@ components:
     capabilities:
       - id: powerMeter
         version: 1
-      - id: examplens.gridEnergy
+      - id: gridEnergy
         version: 1
     categories:
       - name: SolarPanel

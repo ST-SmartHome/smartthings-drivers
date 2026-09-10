@@ -1,5 +1,5 @@
-name: se-modbus-v4
-packageKey: se-modbus-v4
+name: se-modbus-tcp
+packageKey: se-modbus-tcp
 author: BenM
 description: SolarEdge inverter via local Modbus TCP (SunSpec)
 permissions:
