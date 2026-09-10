@@ -1120,45 +1120,41 @@ local function ensure_light_child(driver, device)
   end
 end
 
-local function device_init(driver, device)
-  log.info("BAF device init: " .. device.id)
-  if is_light_child(device) then
-    -- No profile-switch logic (always LIGHT_CHILD_PROFILE, never
-    -- changes) and no polling timer of its own — state comes entirely
-    -- from the parent's own poll cycle. See start_polling/poll_once.
-    return
-  end
-  ensure_correct_profile(driver, device)
-  ensure_light_child(driver, device)
-  -- Seed showSettings' default here rather than leaving it to whatever
-  -- happens first -- unlike sleepMode (MORE_PUSH, genuinely unknown
-  -- until a real command), this is pure local state with nothing to
-  -- wait on, so device_init can safely set it once. Guarded by
-  -- get_latest_state so a restart never clobbers an explicit choice the
-  -- user already made -- only a device that's never had this attribute
-  -- at all gets the default. Only meaningful on profiles that actually
-  -- declare the settings component/capability; a no-op emit on one that
-  -- doesn't (older profile variants) is silently dropped, same as any
-  -- other capability/component mismatch in this driver.
+--- Seeds default values for the driver's 6 pure-local-UI-state phantom
+--- switches (showSettings/showSchedule/showComfort/showHeat/showMotion/
+--- showReturnToAuto) on any device that's never had one set. Unlike
+--- sleepMode (MORE_PUSH, genuinely unknown until a real command), these
+--- are pure local state with nothing to wait on, so it's safe to default
+--- them immediately. Guarded by get_latest_state per attribute so this
+--- never clobbers an explicit choice the user already made -- only a
+--- device that's never had a given attribute at all gets the default.
+--- Only meaningful on profiles that actually declare the relevant
+--- component/capability; a no-op emit on one that doesn't (older profile
+--- variants) is silently dropped, same as any other capability/component
+--- mismatch in this driver.
+---
+--- Called from both device_init (the normal path -- runs once per
+--- pairing, and again for every device whenever the driver process
+--- restarts) and info_changed (a defensive retry -- device_init only
+--- ever runs at those two moments, so a one-off transient failure on a
+--- single emit during a brand-new device's very first device_init (hub
+--- busy syncing a just-paired device, say) can otherwise leave that one
+--- attribute stuck null forever with no other trigger to fix it; a real
+--- case found 2026-09-10, one fan's showMotion, while every sibling
+--- attribute on the same device succeeded).
+local function seed_phantom_switches(driver, device)
   local settings_component = device.profile.components.settings
   if settings_component and
       device:get_latest_state("settings", "examplens.showSettings", "showSettings") == nil then
     device:emit_component_event(settings_component,
       SHOW_SETTINGS_CAP.showSettings({ value = "On" }))
   end
-  -- Same seed pattern as showSettings above -- pure local UI state, safe
-  -- to default immediately. Real value "On" (see show_schedule_on's
-  -- comment for the 2026-09-03 On/Off correction).
   local schedule_component = device.profile.components.schedule
   if schedule_component and
       device:get_latest_state("schedule", "examplens.showSchedule", "showSchedule") == nil then
     device:emit_component_event(schedule_component,
       SHOW_SCHEDULE_CAP.showSchedule({ value = "On" }))
   end
-  -- Same seed pattern again for the 4 new phantom show/hide switches
-  -- (2026-09-05) -- pure local UI state, safe to default immediately,
-  -- guarded the same way so a restart never clobbers a user's own
-  -- collapse/expand choice.
   local comfort_component = device.profile.components.comfort
   if comfort_component and
       device:get_latest_state("comfort", "examplens.comfortSection", "showComfort") == nil then
@@ -1183,6 +1179,19 @@ local function device_init(driver, device)
     device:emit_component_event(return_to_auto_component,
       SHOW_RETURN_TO_AUTO_CAP.showReturnToAuto({ value = "On" }))
   end
+end
+
+local function device_init(driver, device)
+  log.info("BAF device init: " .. device.id)
+  if is_light_child(device) then
+    -- No profile-switch logic (always LIGHT_CHILD_PROFILE, never
+    -- changes) and no polling timer of its own -- state comes entirely
+    -- from the parent's own poll cycle. See start_polling/poll_once.
+    return
+  end
+  ensure_correct_profile(driver, device)
+  ensure_light_child(driver, device)
+  seed_phantom_switches(driver, device)
   -- Real, network-dependent status -- wrapped in pcall like poll_once,
   -- for the same reason: an uncaught error here must never stop
   -- start_polling below from ever running.
@@ -1200,6 +1209,11 @@ end
 
 local function info_changed(driver, device, event, args)
   log.info("BAF preferences changed, restarting polling")
+  -- Defensive retry for the phantom-switch seed (see
+  -- seed_phantom_switches' own comment) -- harmless no-op on a light
+  -- child (its profile has none of the relevant components) and on any
+  -- device where every switch already seeded successfully.
+  seed_phantom_switches(driver, device)
   start_polling(driver, device)
 end
 
