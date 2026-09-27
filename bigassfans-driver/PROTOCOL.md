@@ -32,7 +32,7 @@ query first (see `BafClient.commit_and_verify_more`).
 | 50 | `comfort_min_speed` | int | FAN | Comfort screen's "Min Speed", native 0–7 |
 | 51 | `comfort_max_speed` | int | FAN | Comfort screen's "Max Speed", native 0–7 (7 = on-screen "No Max") |
 | 52 | `motion_sense_enable` | bool | FAN | Motion/occupancy sensing master enable. Only takes effect while `fan_mode = AUTO`. Confirmed working — write applies immediately, not delayed |
-| 53 | `motion_sense_timeout` | int (seconds) | FAN | How long to keep running after motion stops, once triggered by occupancy (confirmed 7200 = 2 hours on one fan's setting) |
+| 53 | `motion_sense_timeout` | int (seconds) | FAN | How long to keep running after motion stops, once triggered by occupancy (confirmed 7200 = 2 hours on one fan's setting). Named `motion_timeout_secs` in the driver's code |
 | 54 | `return_to_auto_enable` | bool | FAN | The FAN-menu "Return to Auto" master toggle — distinct from the Sleep-specific pair at 129/130 below |
 | 55 | `return_to_auto_secs` | int (seconds) | FAN | Duration for the above |
 | 58 | `whoosh_enable` | bool | FAN | Confirmed to apply with unpredictable delay, sometimes minutes — same caveat as `reverse_enable` |
@@ -41,10 +41,11 @@ query first (see `BafClient.commit_and_verify_more`).
 | 62 | `heat_assist_reverse` | bool | FAN | Comfort screen's "Reverse" toggle under Heat Assist. (Fields 52 and 62 were once confused with each other during initial discovery — an isolated capture resolved which is which; both rows above now reflect the confirmed answer.) |
 | 64 | `current_rpm` | int | FAN | Live motor RPM, read-only telemetry |
 | 65 | `eco_enable` | bool | FAN | Confirmed not instant — typically ~1–2 minutes to apply |
-| 66 | `fan_occupancy_detected` | bool | FAN | Read-only — whether the fan currently detects motion in the room |
+| 66 | `fan_occupancy_detected` | bool | FAN | Read-only — whether the fan currently detects motion in the room. Field number/name from the upstream `aiobafi6.proto` schema; not currently read by this driver |
 | 68 | `light_mode` | enum | LIGHT | Off/On/Auto |
 | 69 | `light_brightness_percent` | int | LIGHT | 0–100%, maps directly to the app's brightness slider |
 | 85 | `light_occupancy_detected` | bool | LIGHT | Read-only, light's own motion detection — field number/name confirmed via the upstream `aiobafi6.proto` schema directly, not yet independently queried or tested against real hardware by this driver |
+| 86 | `temperature_raw` | int (×100 °C) | SENSORS | The fan's built-in temperature sensor (e.g. 3170 = 31.70 °C). Read by this driver for the fan's temperature reading; checked against a nearby reference thermometer (about 1 °C apart) |
 | 98 | `sleep_mode_enable` | bool | MORE push-only | Sleep Mode master toggle (a real physical remote button) |
 | 100 | `sleep_fan_mode` | enum | FAN | Off/On/Auto — the Sleep tab's own fan-mode selector, distinct from the main `fan_mode` |
 | 101 | `sleep_speed` | int | FAN | Native 0–7 — the Sleep tab's own current fan speed (shown as "Speed" on the Sleep ON-mode screen), distinct from the main `speed` field |
@@ -147,13 +148,23 @@ documented behavior — see the "Full category sweep" section of
 `src/baf_protocol.lua`'s `FIELDS` table for the fullest detail and
 caveats on each.
 
+- **Found via a narrated pcap** (one data point, not an isolated test):
+  `sleep_light_auto_motion_timeout_secs`(117, int seconds, LIGHT) — the
+  Sleep preset's Light-Auto motion timeout (a committed 1800 matched
+  "Motion timeout 30min" on screen). Separate from the Wake Up preset's
+  `wake_up_motion_timeout_secs`(128).
 - **Found via a full category sweep** (not a pcap): `fan_target_rpm`(63,
   FAN) — identical value to the read-only `current_rpm`(64) in the same
   query, worth checking whether it's a real commanded setpoint;
-  `wifi_module_version`(16, ALL category, nested submessage with a
-  version string distinct from the main fan firmware version); and the
-  `NETWORK` category (never queried by this driver before), which
-  exposes the fan's own IP and — notably — **the connected Wi-Fi SSID
-  name in plaintext** to anyone on the LAN who queries it, unauthenticated
-  (a real protocol-level fact worth knowing on its own, regardless of
-  whether it ever becomes a capability).
+  `wifi_module_version`(16, ALL category, nested submessage: sub-field 1
+  a small int, sub-field 2 a version string distinct from the main fan
+  firmware version); two unidentified ALL-category ints, `all_field_15`(15)
+  and `all_field_153`(153); and the `NETWORK` category (never queried by
+  this driver before): `network_ip`(120, string, the fan's own IP),
+  `network_field_121`(121, int, unidentified) and
+  `network_wifi_info`(124, nested submessage). Sub-field 1 of 124 is
+  **the connected Wi-Fi SSID name in plaintext**, readable by anyone on
+  the LAN who queries it, unauthenticated (a real protocol-level fact
+  worth knowing on its own, regardless of whether it ever becomes a
+  capability). A second sub-field that looked like a signal-strength
+  reading appeared in one query but not the next; unconfirmed.
