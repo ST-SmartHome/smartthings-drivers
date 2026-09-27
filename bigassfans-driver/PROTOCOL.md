@@ -61,6 +61,7 @@ query first (see `BafClient.commit_and_verify_more`).
 | 110 | `sleep_timer_enable` | bool | FAN | The Sleep tab's own on-device Timer toggle (separate from `sleep_mode_enable` and from SmartThings' unrelated generic "Timer" card) |
 | 111 | `sleep_timer_end_speed` | int | FAN | Native 0–7 — the Sleep Timer's "End Speed", the target speed it gradually decreases to over `sleep_timer_duration` |
 | 112 | `sleep_timer_duration` | int (seconds) | FAN | Sleep Timer's duration |
+| 117 | `sleep_light_auto_motion_timeout_secs` | int (seconds) | LIGHT | The **Sleep** preset's light Auto motion timeout, only shown in the app while the Sleep light is set to Auto. **Confirmed 2026-09-27**: changed 60 → 120 when set to 2 min, and the app's Sleep light screen then showed "2 min". Separate from the main light's timeout (73) and the Wake Up preset's (128) |
 | 120 | `network_ip` | string | NETWORK | The fan's own LAN IP. Confirmed 2026-09-27 against each fan's known address |
 | 124 | `network_wifi_info` | nested | NETWORK | Sub-field 1: the connected Wi-Fi SSID in **plaintext**, readable unauthenticated by anyone on the LAN (confirmed 2026-09-27). Sub-field 2: a negative dBm-range value that changes between reads, very likely signal strength (RSSI) |
 | 128 | `wake_up_motion_timeout_secs` | int (seconds) | LIGHT | Wake Up preset's post-motion timeout |
@@ -162,7 +163,6 @@ could be checked against a known fact, not an isolated change test.
 |---|---|---|---|---|
 | 15 | `all_field_15` | int | ALL / FIRMWARE | Same value (7) on both fans; meaning unknown |
 | 16 | `wifi_module_version` | nested, repeated | ALL / FIRMWARE | Two entries. Entry 1: `{1: 1, 2: "<version>"}`, a Wi-Fi module version (same on both fans). Entry 2: `{3: "<version>", 4: "<code>", 5: "<letters>"}`, differing between the two fans (versions 2.5.0 vs 2.2.22, suffix "B/C/D/E" vs "A"). Probably a component-version list rather than one version; still to match against the app's firmware screen |
-| 117 | `sleep_light_auto_motion_timeout_secs` | int (seconds) | LIGHT | Differs per fan (1800 on one, 60 on the other). **Not** the main light Auto motion timeout (that's 73, confirmed); most likely the Sleep preset's own light timeout, still to check in the app's Sleep settings |
 | 121 | `network_field_121` | int | NETWORK | 0 on both fans; meaning unknown |
 | 153 | `all_field_153` | int | ALL / FIRMWARE | 0 on both fans; meaning unknown |
 
