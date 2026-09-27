@@ -39,11 +39,13 @@ query first (see `BafClient.commit_and_verify_more`).
 | 60 | `heat_assist_enable` | bool | FAN | Comfort screen's "Heat Assist" toggle |
 | 61 | `heat_assist_speed` | int | FAN | Heat Assist's own fan speed, native 0–7, independent of the main `speed` field |
 | 62 | `heat_assist_reverse` | bool | FAN | Comfort screen's "Reverse" toggle under Heat Assist. (Fields 52 and 62 were once confused with each other during initial discovery — an isolated capture resolved which is which; both rows above now reflect the confirmed answer.) |
+| 63 | `fan_target_rpm` | int | FAN | Target RPM for the current speed setting. **Confirmed 2026-09-27**: after a speed change it jumps straight to the new value while `current_rpm`(64) ramps to meet it over ~20 s. The RPM for a given speed differs between fans (speed 5 gave 125 on one fan, 141 on the other) |
 | 64 | `current_rpm` | int | FAN | Live motor RPM, read-only telemetry |
 | 65 | `eco_enable` | bool | FAN | Confirmed not instant — typically ~1–2 minutes to apply |
 | 66 | `fan_occupancy_detected` | bool | FAN | Read-only — whether the fan currently detects motion in the room. Field number/name from the upstream `aiobafi6.proto` schema; present in a 2026-09-27 live sweep, not currently read by this driver |
 | 68 | `light_mode` | enum | LIGHT | Off/On/Auto |
 | 69 | `light_brightness_percent` | int | LIGHT | 0–100%, maps directly to the app's brightness slider |
+| 73 | `light_auto_motion_timeout` | int (seconds) | LIGHT | The light's Auto-mode motion timeout. **Confirmed 2026-09-27** by an isolated change: setting it to 2 h in the app changed only this field (10800 → 7200) on both fans. Not the Sleep preset's timeout (117), which stayed unchanged |
 | 85 | `light_occupancy_detected` | bool | LIGHT | Read-only, light's own motion detection — field number/name confirmed via the upstream `aiobafi6.proto` schema directly, not yet independently queried or tested against real hardware by this driver |
 | 86 | `temperature_raw` | int (×100 °C) | SENSORS | The fan's built-in temperature sensor (e.g. 3170 = 31.70 °C). Read by this driver for the fan's temperature reading; checked against a nearby reference thermometer (about 1 °C apart) |
 | 98 | `sleep_mode_enable` | bool | MORE push-only | Sleep Mode master toggle (a real physical remote button) |
@@ -57,6 +59,8 @@ query first (see `BafClient.commit_and_verify_more`).
 | 110 | `sleep_timer_enable` | bool | FAN | The Sleep tab's own on-device Timer toggle (separate from `sleep_mode_enable` and from SmartThings' unrelated generic "Timer" card) |
 | 111 | `sleep_timer_end_speed` | int | FAN | Native 0–7 — the Sleep Timer's "End Speed", the target speed it gradually decreases to over `sleep_timer_duration` |
 | 112 | `sleep_timer_duration` | int (seconds) | FAN | Sleep Timer's duration |
+| 120 | `network_ip` | string | NETWORK | The fan's own LAN IP. Confirmed 2026-09-27 against each fan's known address |
+| 124 | `network_wifi_info` | nested | NETWORK | Sub-field 1: the connected Wi-Fi SSID in **plaintext**, readable unauthenticated by anyone on the LAN (confirmed 2026-09-27). Sub-field 2: a negative dBm-range value that changes between reads, very likely signal strength (RSSI) |
 | 128 | `wake_up_motion_timeout_secs` | int (seconds) | LIGHT | Wake Up preset's post-motion timeout |
 | 129 | `sleep_return_to_auto` | bool | FAN | The Auto screen's "Return to Auto" toggle — auto-reverts a manual adjustment after `sleep_return_to_auto_secs` |
 | 130 | `sleep_return_to_auto_secs` | int (seconds) | FAN | Duration for the above |
@@ -156,16 +160,16 @@ could be checked against a known fact, not an isolated change test.
 |---|---|---|---|---|
 | 15 | `all_field_15` | int | ALL / FIRMWARE | Same value (7) on both fans; meaning unknown |
 | 16 | `wifi_module_version` | nested, repeated | ALL / FIRMWARE | Two entries. Entry 1: `{1: 1, 2: "<version>"}`, a Wi-Fi module version (same on both fans). Entry 2: `{3: "<version>", 4: "<code>", 5: "<letters>"}`, differing between the two fans (versions 2.5.0 vs 2.2.22, suffix "B/C/D/E" vs "A"). Probably a component-version list rather than one version; still to match against the app's firmware screen |
-| 63 | `fan_target_rpm` | int | FAN | Equal to or 1 away from `current_rpm`(64) on both fans at steady speed. Consistent with a target speed; needs a speed-change test |
-| 117 | `sleep_light_auto_motion_timeout_secs` | int (seconds) | LIGHT | Differs per fan (1800 on one, 60 on the other), consistent with a per-fan setting. Still to check against the app's value on each fan |
-| 120 | `network_ip` | string | NETWORK | **Confirmed**: matches each fan's LAN IP |
+| 117 | `sleep_light_auto_motion_timeout_secs` | int (seconds) | LIGHT | Differs per fan (1800 on one, 60 on the other). **Not** the main light Auto motion timeout (that's 73, confirmed); most likely the Sleep preset's own light timeout, still to check in the app's Sleep settings |
 | 121 | `network_field_121` | int | NETWORK | 0 on both fans; meaning unknown |
-| 124 | `network_wifi_info` | nested | NETWORK | **Sub-field 1 confirmed**: the connected Wi-Fi SSID, in plaintext, readable unauthenticated by anyone on the LAN. Sub-field 2: a negative, dBm-range value that changed between reads on the same fan; very likely signal strength (RSSI) |
 | 153 | `all_field_153` | int | ALL / FIRMWARE | 0 on both fans; meaning unknown |
+
+Field 67 flipped 1 → 0 when a fan went from Auto to On, so it probably
+reflects Auto mode (one observation, unconfirmed).
 
 Also returned by the sweep but not modeled by this driver: 66 and 85
 (both present, supporting the rows above), plus 3, 4, 5, 6, 11, 59, 67,
-70–75, 77–79, 82, 83, 87, 89, 95, 96, 109, 113–116, 118, 126, 127, 140,
+70–72, 74, 75, 77–79, 82, 83, 87, 89, 95, 96, 109, 113–116, 118, 126, 127, 140,
 150, 156, 171–175, 207 and 230. Several look like upstream-schema fields
 (for example 4/5 date-times, 6 a timezone string, 11 the cloud server
 host, 71/78/79/116/127 a 2700 value matching the bulb's fixed colour
