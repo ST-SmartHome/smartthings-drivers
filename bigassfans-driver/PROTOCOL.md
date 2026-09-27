@@ -46,7 +46,7 @@ query first (see `BafClient.commit_and_verify_more`).
 | 68 | `light_mode` | enum | LIGHT | Off/On/Auto |
 | 69 | `light_brightness_percent` | int | LIGHT | 0–100%, maps directly to the app's brightness slider |
 | 73 | `light_auto_motion_timeout` | int (seconds) | LIGHT | The light's Auto-mode motion timeout. **Confirmed 2026-09-27** by an isolated change: setting it to 2 h in the app changed only this field (10800 → 7200) on both fans. Not the Sleep preset's timeout (117), which stayed unchanged |
-| 74 | `light_return_to_auto_enable` (name ours) | bool | LIGHT | Return to Auto on/off, most likely the light's (the fan's own pair, 54/55, didn't change). **Confirmed 2026-09-27** by an isolated change: switching Return to Auto on in the app flipped this 0 → 1 on both fans |
+| 74 | `light_return_to_auto_enable` (name ours) | bool | LIGHT | The **Light** screen's Return to Auto on/off (confirmed as the light's by where it was set; the fan's own pair, 54/55, didn't change). **Confirmed 2026-09-27** by an isolated change: switching Return to Auto on in the app flipped this 0 → 1 on both fans |
 | 75 | `light_return_to_auto_secs` (name ours) | int (seconds) | LIGHT | Duration for 74. **Confirmed 2026-09-27**: setting 3 h in the app changed it 7200 → 10800 on both fans |
 | 85 | `light_occupancy_detected` | bool | LIGHT | Read-only, light's own motion detection — field number/name confirmed via the upstream `aiobafi6.proto` schema directly, not yet independently queried or tested against real hardware by this driver |
 | 86 | `temperature_raw` | int (×100 °C) | SENSORS | The fan's built-in temperature sensor (e.g. 3170 = 31.70 °C). Read by this driver for the fan's temperature reading; checked against a nearby reference thermometer (about 1 °C apart) |
