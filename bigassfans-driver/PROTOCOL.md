@@ -41,7 +41,7 @@ query first (see `BafClient.commit_and_verify_more`).
 | 62 | `heat_assist_reverse` | bool | FAN | Comfort screen's "Reverse" toggle under Heat Assist. (Fields 52 and 62 were once confused with each other during initial discovery — an isolated capture resolved which is which; both rows above now reflect the confirmed answer.) |
 | 64 | `current_rpm` | int | FAN | Live motor RPM, read-only telemetry |
 | 65 | `eco_enable` | bool | FAN | Confirmed not instant — typically ~1–2 minutes to apply |
-| 66 | `fan_occupancy_detected` | bool | FAN | Read-only — whether the fan currently detects motion in the room. Field number/name from the upstream `aiobafi6.proto` schema; not currently read by this driver |
+| 66 | `fan_occupancy_detected` | bool | FAN | Read-only — whether the fan currently detects motion in the room. Field number/name from the upstream `aiobafi6.proto` schema; present in a 2026-09-27 live sweep, not currently read by this driver |
 | 68 | `light_mode` | enum | LIGHT | Off/On/Auto |
 | 69 | `light_brightness_percent` | int | LIGHT | 0–100%, maps directly to the app's brightness slider |
 | 85 | `light_occupancy_detected` | bool | LIGHT | Read-only, light's own motion detection — field number/name confirmed via the upstream `aiobafi6.proto` schema directly, not yet independently queried or tested against real hardware by this driver |
@@ -148,23 +148,25 @@ documented behavior — see the "Full category sweep" section of
 `src/baf_protocol.lua`'s `FIELDS` table for the fullest detail and
 caveats on each.
 
-- **Found via a narrated pcap** (one data point, not an isolated test):
-  `sleep_light_auto_motion_timeout_secs`(117, int seconds, LIGHT) — the
-  Sleep preset's Light-Auto motion timeout (a committed 1800 matched
-  "Motion timeout 30min" on screen). Separate from the Wake Up preset's
-  `wake_up_motion_timeout_secs`(128).
-- **Found via a full category sweep** (not a pcap): `fan_target_rpm`(63,
-  FAN) — identical value to the read-only `current_rpm`(64) in the same
-  query, worth checking whether it's a real commanded setpoint;
-  `wifi_module_version`(16, ALL category, nested submessage: sub-field 1
-  a small int, sub-field 2 a version string distinct from the main fan
-  firmware version); two unidentified ALL-category ints, `all_field_15`(15)
-  and `all_field_153`(153); and the `NETWORK` category (never queried by
-  this driver before): `network_ip`(120, string, the fan's own IP),
-  `network_field_121`(121, int, unidentified) and
-  `network_wifi_info`(124, nested submessage). Sub-field 1 of 124 is
-  **the connected Wi-Fi SSID name in plaintext**, readable by anyone on
-  the LAN who queries it, unauthenticated (a real protocol-level fact
-  worth knowing on its own, regardless of whether it ever becomes a
-  capability). A second sub-field that looked like a signal-strength
-  reading appeared in one query but not the next; unconfirmed.
+**Read-only sweep of both fans, 2026-09-27** (every query category except
+SCHEDULES; queries only, no commits). "Confirmed" here means the value
+could be checked against a known fact, not an isolated change test.
+
+| No. | Name | Kind | Category | Result |
+|---|---|---|---|---|
+| 15 | `all_field_15` | int | ALL / FIRMWARE | Same value (7) on both fans; meaning unknown |
+| 16 | `wifi_module_version` | nested, repeated | ALL / FIRMWARE | Two entries. Entry 1: `{1: 1, 2: "<version>"}`, a Wi-Fi module version (same on both fans). Entry 2: `{3: "<version>", 4: "<code>", 5: "<letters>"}`, differing between the two fans (versions 2.5.0 vs 2.2.22, suffix "B/C/D/E" vs "A"). Probably a component-version list rather than one version; still to match against the app's firmware screen |
+| 63 | `fan_target_rpm` | int | FAN | Equal to or 1 away from `current_rpm`(64) on both fans at steady speed. Consistent with a target speed; needs a speed-change test |
+| 117 | `sleep_light_auto_motion_timeout_secs` | int (seconds) | LIGHT | Differs per fan (1800 on one, 60 on the other), consistent with a per-fan setting. Still to check against the app's value on each fan |
+| 120 | `network_ip` | string | NETWORK | **Confirmed**: matches each fan's LAN IP |
+| 121 | `network_field_121` | int | NETWORK | 0 on both fans; meaning unknown |
+| 124 | `network_wifi_info` | nested | NETWORK | **Sub-field 1 confirmed**: the connected Wi-Fi SSID, in plaintext, readable unauthenticated by anyone on the LAN. Sub-field 2: a negative, dBm-range value that changed between reads on the same fan; very likely signal strength (RSSI) |
+| 153 | `all_field_153` | int | ALL / FIRMWARE | 0 on both fans; meaning unknown |
+
+Also returned by the sweep but not modeled by this driver: 66 and 85
+(both present, supporting the rows above), plus 3, 4, 5, 6, 11, 59, 67,
+70–75, 77–79, 82, 83, 87, 89, 95, 96, 109, 113–116, 118, 126, 127, 140,
+150, 156, 171–175, 207 and 230. Several look like upstream-schema fields
+(for example 4/5 date-times, 6 a timezone string, 11 the cloud server
+host, 71/78/79/116/127 a 2700 value matching the bulb's fixed colour
+temperature), but none have been checked.
