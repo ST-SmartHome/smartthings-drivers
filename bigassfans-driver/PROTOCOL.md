@@ -63,7 +63,7 @@ query first (see `BafClient.commit_and_verify_more`).
 | 112 | `sleep_timer_duration` | int (seconds) | FAN | Sleep Timer's duration |
 | 117 | `sleep_light_auto_motion_timeout_secs` | int (seconds) | LIGHT | The **Sleep** preset's light Auto motion timeout, only shown in the app while the Sleep light is set to Auto. **Confirmed 2026-09-27**: changed 60 → 120 when set to 2 min, and the app's Sleep light screen then showed "2 min". Separate from the main light's timeout (73) and the Wake Up preset's (128) |
 | 120 | `network_ip` | string | NETWORK | The fan's own LAN IP. Confirmed 2026-09-27 against each fan's known address |
-| 124 | `network_wifi_info` | nested | NETWORK | Sub-field 1: the connected Wi-Fi SSID in **plaintext**, readable unauthenticated by anyone on the LAN (confirmed 2026-09-27). Sub-field 2: a negative dBm-range value that changes between reads, very likely signal strength (RSSI) |
+| 124 | `network_wifi_info` | nested | NETWORK | Sub-field 1: the connected Wi-Fi SSID in **plaintext**, readable unauthenticated by anyone on the LAN (confirmed 2026-09-27). Sub-field 2: a negative dBm-range value that changes between reads, very likely signal strength (RSSI). Upstream `WifiProperties` only defines sub-field 1 (`ssid`), so sub-field 2 is new |
 | 128 | `wake_up_motion_timeout_secs` | int (seconds) | LIGHT | Wake Up preset's post-motion timeout |
 | 129 | `sleep_return_to_auto` | bool | FAN | The Auto screen's "Return to Auto" toggle — auto-reverts a manual adjustment after `sleep_return_to_auto_secs` |
 | 130 | `sleep_return_to_auto_secs` | int (seconds) | FAN | Duration for the above |
@@ -162,7 +162,7 @@ could be checked against a known fact, not an isolated change test.
 | No. | Name | Kind | Category | Result |
 |---|---|---|---|---|
 | 15 | `all_field_15` | int | ALL / FIRMWARE | Same value (7) on both fans; meaning unknown |
-| 16 | `wifi_module_version` | nested, repeated | ALL / FIRMWARE | Two entries. Entry 1: `{1: 1, 2: "<version>"}`, a Wi-Fi module version (same on both fans). Entry 2: `{3: "<version>", 4: "<code>", 5: "<letters>"}`, differing between the two fans (versions 2.5.0 vs 2.2.22, suffix "B/C/D/E" vs "A"). Probably a component-version list rather than one version; still to match against the app's firmware screen |
+| 16 | `firmware` (upstream `FirmwareProperties`; `wifi_module_version` in our code) | nested | ALL / FIRMWARE | Upstream sub-fields: 2 `firmware_version`, 3 `bootloader_version`, 4 `mac_address`. The fan sends it in two parts that merge into one message: sub-field 2 (same on both fans) and sub-field 3, the bootloader, which **differs between two fans that both report no updates needed** (2.5.0 vs 2.2.22), as bootloaders usually don't update. Sub-field 4 held a 6-digit code rather than a MAC, and sub-field 5 (letters such as "A" or "B/C/D/E", possibly hardware revisions) isn't in the upstream schema |
 | 121 | `network_field_121` | int | NETWORK | 0 on both fans; meaning unknown |
 | 153 | `all_field_153` | int | ALL / FIRMWARE | 0 on both fans; meaning unknown |
 
@@ -170,10 +170,25 @@ Field 67 flipped 1 → 0 when a fan went from Auto to On, but stayed 0
 when the same fan went back to Auto, so it is **not** an Auto-mode flag.
 Meaning unknown.
 
-Also returned by the sweep but not modeled by this driver: 66 and 85
-(both present, supporting the rows above), plus 3, 4, 5, 6, 11, 59, 67,
-70–72, 77–79, 82, 83, 87, 89, 95, 96, 109, 113–116, 118, 126, 127, 140,
-150, 156, 171–175, 207 and 230. Several look like upstream-schema fields
-(for example 4/5 date-times, 6 a timezone string, 11 the cloud server
-host, 71/78/79/116/127 a 2700 value matching the bulb's fixed colour
-temperature), but none have been checked.
+Also returned by the sweep but not modeled by this driver. Names from the
+upstream `aiobafi6.proto` where it has them (values not verified beyond
+being plausible):
+
+| No. | Upstream name | Kind | Observed |
+|---|---|---|---|
+| 4 | `local_datetime` | string | The fan's local date-time (ISO 8601) |
+| 5 | `utc_datetime` | string | UTC date-time (ISO 8601) |
+| 11 | `api_endpoint` | string | The cloud API host name |
+| 70 | `light_brightness_level` | int (0–16) | 0 |
+| 71 | `light_color_temperature` | int (K) | 2700, the fixed bulb's colour temperature |
+| 77 | `light_dim_to_warm_enable` | bool | 0 |
+| 78 | `light_warmest_color_temperature` | int (K) | 2700 |
+| 79 | `light_coolest_color_temperature` | int (K) | 2700 (same as 78: a fixed-temperature bulb) |
+| 87 | `humidity` | int (upstream: percent) | 100000 on both fans, which doesn't fit a percentage; possibly a "no sensor" value |
+| 152 | `remote_firmware` | nested | Not returned by these fans |
+| 156 | `stats` | nested | Sub-field 1 = `uptime_minutes` (increments once a minute; matches both fans' last power-up). Sub-fields 2, 4, 5, 6 aren't in the upstream schema |
+
+Not in the upstream schema at all: 3, 6 (a timezone string), 15, 59, 67,
+72, 82, 83, 89, 95, 96, 109, 113–116, 118, 126, 127, 140, 150, 153,
+171–175, 207 and 230. Of these, 116 and 127 read 2700 like the colour
+temperature fields; the rest are unidentified.
