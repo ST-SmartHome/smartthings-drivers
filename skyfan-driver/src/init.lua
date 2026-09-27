@@ -4,6 +4,7 @@ local log = require "log"
 
 local discovery = require "discovery"
 local TuyaClient = require "tuya_client"
+local socket = require "cosock.socket"
 
 local POLL_TIMER_FIELD = "poll_timer"
 
@@ -184,8 +185,17 @@ local function poll_once(driver, device)
 
     local dps, query_err = TuyaClient.query_status(s.ip, s.local_key, s.device_id, 5)
     if not dps then
-      log.error("Skyfan DC poll failed: " .. tostring(query_err))
-      return
+      -- 2026-09-25: some fans reset the first connection after an idle
+      -- gap but accept one made moments later (reproduced off-hub: RST,
+      -- then OK 0.5s later), so retry once.
+      log.warn("Skyfan DC poll attempt 1 failed (" .. tostring(device.label) .. "): " .. tostring(query_err))
+      socket.sleep(0.75)
+      dps, query_err = TuyaClient.query_status(s.ip, s.local_key, s.device_id, 5)
+      if not dps then
+        log.error("Skyfan DC poll failed (" .. tostring(device.label) .. "): " .. tostring(query_err))
+        return
+      end
+      log.info("Skyfan DC poll retry succeeded (" .. tostring(device.label) .. ")")
     end
 
     log.info("Skyfan DC status: " .. (require "dkjson").encode(dps))
@@ -229,7 +239,7 @@ local function start_polling(driver, device)
     poll_once(driver, device)
   end, "skyfan_poll")
   device:set_field(POLL_TIMER_FIELD, timer)
-  log.info(string.format("Skyfan DC polling started: %s every %ds", s.ip, s.poll_interval))
+  log.info(string.format("Skyfan DC polling started (%s): %s every %ds", tostring(device.label), s.ip, s.poll_interval))
 end
 
 --- poll_once is a no-op when called directly on a light-child (it has no
@@ -249,27 +259,195 @@ local function refresh_after_command(driver, device)
   poll_once(driver, device)
 end
 
+-- ===== Resilient writes (2026-09-25) =====
+--
+-- Measured 2026-09-25: even with no commands being sent, a sizeable share
+-- of status queries failed with "Connection reset by peer". A write
+-- goes over the same one-shot connection, and send_dp used to send once
+-- and give up, so a command could be silently lost --
+-- e.g. an Alexa group "turn off the lights" reaching only one of two fans.
+--
+-- Every write now:
+--   * runs on the physical fan's (parent's) device thread, so a light
+--     child's command can't open a second connection to the same fan
+--     while the parent's poll or another command is using it (these Tuya
+--     modules only handle one local connection at a time);
+--   * retries transport failures with jittered backoff;
+--   * reads the state back and resends only if a successful read shows
+--     the wrong value (a failed read is retried, never treated as a
+--     mismatch);
+--   * gives up early if a newer command for the same DP has been issued
+--     since ("latest value wins"), so a retry can never undo a newer
+--     command such as an Alexa "off" arriving during an "on" retry;
+--   * emits state from the verification read, so no extra refresh
+--     connection is opened.
+local WRITE_MAX_ATTEMPTS = 4
+local WRITE_DEADLINE_SECONDS = 25
+local VERIFY_DELAY_SECONDS = 0.7
+local QUERY_MAX_ATTEMPTS = 3
+
+-- desired_dps[parent_device_id][dp] = sequence number of the newest
+-- command for that DP. Recorded when the command arrives, before it is
+-- queued, so a queued or in-flight older write can see it is stale.
+local desired_dps = {}
+local write_sequence = 0
+
+local function backoff(attempt)
+  socket.sleep(attempt * 0.8 + math.random() * 0.6)
+end
+
+--- Normalizes a DP value for comparison: booleans stay booleans, numbers
+--- stay numbers, everything else (enum strings like "forward"/"2h")
+--- compares as a string.
+local function normalize_dp(value)
+  if type(value) == "boolean" or type(value) == "number" then
+    return value
+  end
+  return tostring(value)
+end
+
+local function dps_match(wanted, actual)
+  for dp, value in pairs(wanted) do
+    if actual[dp] == nil or normalize_dp(actual[dp]) ~= normalize_dp(value) then
+      return false
+    end
+  end
+  return true
+end
+
+--- Status query with retries on transport failure. `is_current` (optional)
+--- aborts early when the caller has been superseded. Returns dps or nil, err.
+local function query_with_retry(s, label, is_current)
+  local last_err
+  for attempt = 1, QUERY_MAX_ATTEMPTS do
+    if is_current and not is_current() then
+      return nil, "superseded"
+    end
+    local dps, err = TuyaClient.query_status(s.ip, s.local_key, s.device_id, 5)
+    if dps then
+      return dps
+    end
+    last_err = err
+    log.warn(string.format("Skyfan DC query attempt %d/%d failed (%s): %s",
+      attempt, QUERY_MAX_ATTEMPTS, tostring(label), tostring(err)))
+    if attempt < QUERY_MAX_ATTEMPTS then
+      backoff(attempt)
+    end
+  end
+  return nil, last_err
+end
+
+--- Write with retries on transport failure only (no read-back); used by the
+--- direction interlock, which does its own state verification.
+local function set_dps_with_retry(s, dps, label, is_current)
+  local last_err
+  for attempt = 1, WRITE_MAX_ATTEMPTS do
+    if is_current and not is_current() then
+      return nil, "superseded"
+    end
+    local ok, err = TuyaClient.set_dps(s.ip, s.local_key, s.device_id, dps, 5)
+    if ok then
+      return true
+    end
+    last_err = err
+    log.warn(string.format("Skyfan DC write attempt %d/%d failed (%s): %s",
+      attempt, WRITE_MAX_ATTEMPTS, tostring(label), tostring(err)))
+    if attempt < WRITE_MAX_ATTEMPTS then
+      backoff(attempt)
+    end
+  end
+  return nil, last_err
+end
+
+--- Pushes one query's dps to the fan, its light component and its light
+--- child -- the same fan-out poll_once does.
+local function apply_all_status(driver, parent, dps)
+  apply_fan_status(parent, dps)
+  apply_light_status(parent, dps)
+  local child = find_light_child(driver, parent)
+  if child then
+    apply_light_status(child, dps)
+  end
+end
+
 local function send_dp(driver, device, dps, refresh_after)
   local s = get_settings(device)
   if not s.ip or not s.local_key or not s.device_id then
-    log.warn("Skyfan DC command attempted before device is fully configured")
+    log.warn("Skyfan DC command attempted before device is fully configured (" .. tostring(device.label) .. ")")
     return
   end
-  -- 2026-08-19: tested a longer write timeout here (10s vs the 5s reads
-  -- use) on the theory that acking a control command needs more time than
-  -- acking a status query, since one device was reliably timing out on
-  -- every write while its reads succeeded. Disproven: writes still failed
-  -- identically at the full 10s mark, same "header receive failed:
-  -- timeout" — not a slow-ack issue, no response arrives at all either
-  -- way. Reverted to 5s; don't retry this fix without new information.
-  local ok, err = TuyaClient.set_dps(s.ip, s.local_key, s.device_id, dps, 5)
-  if not ok then
-    log.error("Skyfan DC set_dps failed: " .. tostring(err))
-    return
+  local parent = device
+  if is_light_child(device) then
+    parent = device:get_parent_device()
+    if not parent then
+      log.warn("Skyfan DC light command has no parent fan (" .. tostring(device.label) .. ")")
+      return
+    end
   end
-  if refresh_after then
-    refresh_after_command(driver, device)
+  local label = tostring(parent.label)
+
+  write_sequence = write_sequence + 1
+  local seq = write_sequence
+  local desired = desired_dps[parent.id] or {}
+  desired_dps[parent.id] = desired
+  for dp, _ in pairs(dps) do
+    desired[dp] = seq
   end
+  local function is_current()
+    for dp, _ in pairs(dps) do
+      if desired[dp] ~= seq then
+        return false
+      end
+    end
+    return true
+  end
+  local wanted = (require "dkjson").encode(dps)
+
+  parent.thread:queue_event(function()
+    local ok, err = pcall(function()
+      local deadline = os.time() + WRITE_DEADLINE_SECONDS
+      for attempt = 1, WRITE_MAX_ATTEMPTS do
+        if not is_current() then
+          log.info(string.format("Skyfan DC write %s superseded by a newer command (%s)", wanted, label))
+          return
+        end
+        local sent, send_err = TuyaClient.set_dps(s.ip, s.local_key, s.device_id, dps, 5)
+        if sent then
+          socket.sleep(VERIFY_DELAY_SECONDS)
+          local status, query_err = query_with_retry(s, label, is_current)
+          if status then
+            apply_all_status(driver, parent, status)
+            if dps_match(dps, status) then
+              log.info(string.format("Skyfan DC write %s verified on attempt %d (%s)", wanted, attempt, label))
+              return
+            end
+            log.warn(string.format("Skyfan DC write %s not applied (read back %s), attempt %d/%d (%s)",
+              wanted, (require "dkjson").encode(status), attempt, WRITE_MAX_ATTEMPTS, label))
+          elseif query_err == "superseded" then
+            log.info(string.format("Skyfan DC write %s superseded during verification (%s)", wanted, label))
+            return
+          else
+            log.warn(string.format("Skyfan DC write %s sent but could not be verified (%s): %s",
+              wanted, label, tostring(query_err)))
+            return
+          end
+        else
+          log.warn(string.format("Skyfan DC write %s attempt %d/%d failed (%s): %s",
+            wanted, attempt, WRITE_MAX_ATTEMPTS, label, tostring(send_err)))
+        end
+        if attempt < WRITE_MAX_ATTEMPTS then
+          if os.time() >= deadline then
+            break
+          end
+          backoff(attempt)
+        end
+      end
+      log.error(string.format("Skyfan DC write %s gave up after %d attempts (%s)", wanted, WRITE_MAX_ATTEMPTS, label))
+    end)
+    if not ok then
+      log.error("Skyfan DC write crashed (" .. label .. "): " .. tostring(err))
+    end
+  end)
 end
 
 -- ===== Lifecycle =====
@@ -611,20 +789,20 @@ end
 -- incident on this hardware.
 local DIRECTION_STOP_VERIFY_DELAY_SECONDS = 2
 local MAX_STOP_ATTEMPTS = 3
--- The stop-verify-commit sequence above spans several seconds (up to
--- DIRECTION_STOP_VERIFY_DELAY_SECONDS * MAX_STOP_ATTEMPTS between the
--- first stop commit and a final give-up), with zero coordination between
--- overlapping calls -- before this interlock, set_direction was one
--- synchronous send_dp with a race window of about one TCP round-trip;
--- widening that window by roughly an order of magnitude without adding
--- a guard meant two direction taps in quick succession could run two
--- independent stop/verify/commit chains at once, with whichever one's
--- delayed callback happened to land last deciding the final direction,
--- not necessarily the user's actual last choice. Each new set_direction
--- call stamps a fresh token on the device; every step of the chain below
--- checks it's still current before doing anything, so a superseded
--- in-flight sequence quietly abandons itself instead of racing a newer
--- one.
+-- 2026-09-06: the stop-verify-commit sequence above spans several
+-- seconds (up to DIRECTION_STOP_VERIFY_DELAY_SECONDS * MAX_STOP_ATTEMPTS
+-- between the first stop commit and a final give-up), with zero
+-- coordination between overlapping calls -- before this interlock,
+-- set_direction was one synchronous send_dp with a race window of about
+-- one TCP round-trip; widening that window by roughly an order of
+-- magnitude without adding a guard meant two direction taps in quick
+-- succession could run two independent stop/verify/commit chains at
+-- once, with whichever one's delayed callback happened to land last
+-- deciding the final direction, not necessarily the user's actual last
+-- choice. Each new set_direction call stamps a fresh token on the
+-- device; every step of the chain below checks it's still current
+-- before doing anything, so a superseded in-flight sequence quietly
+-- abandons itself instead of racing a newer one.
 local DIRECTION_CHANGE_TOKEN_FIELD = "direction_change_token"
 
 --- Re-queries status and, once DP1 (switch) confirms off, commits DP8
@@ -643,7 +821,10 @@ local function verify_stopped_then_set_direction(driver, device, s, target_direc
       log.info("Skyfan DC direction-change sequence superseded by a newer request, abandoning this one")
       return
     end
-    local dps, query_err = TuyaClient.query_status(s.ip, s.local_key, s.device_id, 5)
+    local function is_current()
+      return device:get_field(DIRECTION_CHANGE_TOKEN_FIELD) == token
+    end
+    local dps, query_err = query_with_retry(s, device.label, is_current)
     -- Re-check right before committing too: the query above is a real
     -- network round-trip (a yield point), so a newer set_direction call
     -- could have landed while it was in flight.
@@ -653,18 +834,28 @@ local function verify_stopped_then_set_direction(driver, device, s, target_direc
     end
     if dps and dps["1"] == false then
       apply_fan_status(device, dps)
-      local committed, commit_err = TuyaClient.set_dps(s.ip, s.local_key, s.device_id, {["8"] = target_direction}, 5)
+      local committed, commit_err = set_dps_with_retry(s, {["8"] = target_direction}, device.label, is_current)
       if not committed then
-        log.error("Skyfan DC direction commit failed after confirming stopped: " .. tostring(commit_err))
+        log.error("Skyfan DC direction commit failed after confirming stopped (" .. tostring(device.label) .. "): " .. tostring(commit_err))
         return
       end
-      refresh_after_command(driver, device)
+      socket.sleep(VERIFY_DELAY_SECONDS)
+      local after = query_with_retry(s, device.label, is_current)
+      if after then
+        apply_all_status(driver, device, after)
+        if normalize_dp(after["8"]) == normalize_dp(target_direction) then
+          log.info("Skyfan DC direction change to " .. tostring(target_direction) .. " verified (" .. tostring(device.label) .. ")")
+        else
+          log.warn("Skyfan DC direction change to " .. tostring(target_direction) .. " not confirmed, read back " ..
+            tostring(after["8"]) .. " (" .. tostring(device.label) .. ")")
+        end
+      end
       return
     end
     if attempt < MAX_STOP_ATTEMPTS then
       log.warn("Skyfan DC fan not yet confirmed stopped before direction change (attempt " ..
         attempt .. "), resending stop: " .. tostring(query_err))
-      TuyaClient.set_dps(s.ip, s.local_key, s.device_id, {["1"] = false}, 5)
+      set_dps_with_retry(s, {["1"] = false}, device.label, is_current)
       device.thread:call_with_delay(DIRECTION_STOP_VERIFY_DELAY_SECONDS, function()
         verify_stopped_then_set_direction(driver, device, s, target_direction, attempt + 1, token)
       end)
@@ -707,9 +898,11 @@ local function set_direction(driver, device, command)
   -- next check and abandons itself instead of racing this one.
   local token = (device:get_field(DIRECTION_CHANGE_TOKEN_FIELD) or 0) + 1
   device:set_field(DIRECTION_CHANGE_TOKEN_FIELD, token)
-  local stopped, err = TuyaClient.set_dps(s.ip, s.local_key, s.device_id, {["1"] = false}, 5)
+  local stopped, err = set_dps_with_retry(s, {["1"] = false}, device.label, function()
+    return device:get_field(DIRECTION_CHANGE_TOKEN_FIELD) == token
+  end)
   if not stopped then
-    log.error("Skyfan DC direction-change stop commit failed: " .. tostring(err))
+    log.error("Skyfan DC direction-change stop commit failed (" .. tostring(device.label) .. "): " .. tostring(err))
     return
   end
   device.thread:call_with_delay(DIRECTION_STOP_VERIFY_DELAY_SECONDS, function()

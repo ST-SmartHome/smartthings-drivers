@@ -88,12 +88,18 @@ function" endpoint, which only showed 4 of these 8):
   length/encrypted payload/checksum/suffix) and AES-ECB encrypt/decrypt.
   Implements protocol **3.3**.
 - `src/tuya_client.lua` — one-connection-per-request TCP client, mirrors
-  the SolarEdge Modbus client's structure.
+  the SolarEdge Modbus client's structure. The fan's Wi-Fi module accepts
+  only **one** local TCP connection at a time, so all traffic to a fan
+  (polls and commands from both the fan and its light child) runs on
+  that fan's own device thread, never two connections at once.
 - `src/init.lua` — lifecycle handlers, command handlers for all 8 DPs
   plus add-another-fan, the light-child split, the direction-reversal
   safety interlock, and the polling loop (wrapped in `pcall` — an
   uncaught error before the recurring timer registers would otherwise
-  permanently kill auto-polling for that device).
+  permanently kill auto-polling for that device). Commands are retried
+  on connection failure, verified by reading the state back, and
+  abandoned if a newer command for the same setting arrives ("latest
+  value wins"). A failed status poll is retried once after 0.75 s.
 
 ## Known open items
 
@@ -101,6 +107,12 @@ function" endpoint, which only showed 4 of these 8):
   what the enum values actually do.
 - Protocol 3.4 isn't implemented — only needed if a fan is found that
   doesn't speak 3.3.
+- Some units reset the first local connection after an idle gap
+  ("Connection reset by peer") but accept one made a moment later. The
+  poll retry works around this; the firmware-level cause is unknown. A
+  persistent connection with heartbeats would avoid it entirely, but
+  would hold the fan's only local connection and lock out other local
+  clients such as the Smart Life app.
 
 ## Adding a fan (in the SmartThings app)
 
@@ -109,6 +121,11 @@ credential-lookup tool of its own (that needs your own Tuya IoT Platform
 client ID/secret). Use [jasonacox/tinytuya](https://github.com/jasonacox/tinytuya)
 (`pip install tinytuya`, then `python -m tinytuya wizard`) to pull each
 fan's `local_key`/device ID/IP from the Tuya Cloud API.
+
+> **If the lookup fails with "IoT Core service subscription has
+> expired"** (code 28841002), the free IoT Core trial on your Tuya IoT
+> Platform project has lapsed. Extend it at iot.tuya.com (Cloud → Cloud
+> Services → IoT Core), then retry.
 
 > **Don't use the Cloud API's `ip` field as the local IP** — it's the
 > address Tuya's servers last saw the device connect *from* (your
@@ -123,6 +140,14 @@ Every fan after that: use **"Add another fan"** on any existing Skyfan
 device, then configure the new device's preferences the same way.
 
 ## Changelog
+
+- **2026-09-25** — Reliability pass. Commands are now retried on
+  connection failure (up to 4 attempts, jittered backoff, 25 s cap),
+  verified by reading the state back, serialized on the fan's own
+  thread, and superseded by any newer command for the same setting.
+  Prompted by a group "lights off" command reaching only one of two
+  fans. Status polls now retry once after 0.75 s, since some units reset
+  the first connection after idle; with the retry, every poll succeeds.
 
 - **2026-09-02** — Light-child creation is now gated on a live DP-15
   probe (creates unconditionally only if the query fails or the fan
