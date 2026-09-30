@@ -8,14 +8,14 @@ local baf = require "baf_protocol"
 
 local POLL_TIMER_FIELD = "poll_timer"
 
-local FAN_MODE_CAP = capabilities["examplens.fanMode"]
-local FAN_DIRECTION_CAP = capabilities["examplens.fanDirection"]
-local WHOOSH_CAP = capabilities["examplens.whoosh"]
-local ECO_CAP = capabilities["examplens.ecoMode"]
-local LED_INDICATORS_CAP = capabilities["examplens.ledIndicators"]
-local FAN_BEEP_CAP = capabilities["examplens.fanBeep"]
-local LEGACY_IR_REMOTE_CAP = capabilities["examplens.legacyIrRemote"]
-local SLEEP_MODE_CAP = capabilities["examplens.sleepMode"]
+local FAN_MODE_CAP = capabilities["aboutisland47519.fanMode"]
+local FAN_DIRECTION_CAP = capabilities["aboutisland47519.fanDirection"]
+local WHOOSH_CAP = capabilities["aboutisland47519.whoosh"]
+local ECO_CAP = capabilities["aboutisland47519.ecoMode"]
+local LED_INDICATORS_CAP = capabilities["aboutisland47519.ledIndicators"]
+local FAN_BEEP_CAP = capabilities["aboutisland47519.fanBeep"]
+local LEGACY_IR_REMOTE_CAP = capabilities["aboutisland47519.legacyIrRemote"]
+local SLEEP_MODE_CAP = capabilities["aboutisland47519.sleepMode"]
 -- Phantom switch (2026-08-29, user request): purely local UI state, no
 -- protocol commit at all -- unlike sleepMode/ledIndicators/etc above,
 -- there's no real hardware behind this at all, just a stored value other
@@ -23,15 +23,15 @@ local SLEEP_MODE_CAP = capabilities["examplens.sleepMode"]
 -- MORE_PUSH pattern for anything gate-only like this: device_init can
 -- safely seed a real default immediately (see below), no stuck-null
 -- window to fail open around.
-local SHOW_SETTINGS_CAP = capabilities["examplens.showSettings"]
-local ADD_ANOTHER_CAP = capabilities["examplens.addAnotherFan"]
+local SHOW_SETTINGS_CAP = capabilities["aboutisland47519.showSettings"]
+local ADD_ANOTHER_CAP = capabilities["aboutisland47519.addAnotherFan"]
 
 -- Sleep/Wake Up sub-settings (2026-08-27) -- see baf_protocol.lua for the
 -- field-decode writeup and project-status memory for how each was
 -- confirmed. All read via the normal FAN/LIGHT category poll (these are
 -- directly queryable, unlike sleepMode/ledIndicators/etc above), written
 -- via the normal send_commit/verify_commit path.
-local SLEEP_FAN_MODE_CAP = capabilities["examplens.sleepAutoMode"]
+local SLEEP_FAN_MODE_CAP = capabilities["aboutisland47519.sleepAutoMode"]
 -- Headless mirror of sleepAutoMode's own value (2026-08-29), never shown
 -- in the app itself (no detailView entry). Real purpose (corrected
 -- 2026-09-02 -- an earlier version of this comment attributed it to a
@@ -53,10 +53,10 @@ local SLEEP_FAN_MODE_CAP = capabilities["examplens.sleepAutoMode"]
 -- toggles for each of the 4 new components reuse the standard `switch`
 -- capability (see switch_on/switch_off's component branches below), not
 -- a custom one.
-local COMFORT_IDEAL_TEMP_CAP = capabilities["examplens.comfortIdealTemp"]
-local COMFORT_MIN_SPEED_CAP = capabilities["examplens.comfortMinSpeed"]
-local COMFORT_MAX_SPEED_CAP = capabilities["examplens.comfortMaxSpeed"]
-local HEAT_ASSIST_SPEED_CAP = capabilities["examplens.heatAssistSpeed"]
+local COMFORT_IDEAL_TEMP_CAP = capabilities["aboutisland47519.comfortIdealTemp"]
+local COMFORT_MIN_SPEED_CAP = capabilities["aboutisland47519.comfortMinSpeed"]
+local COMFORT_MAX_SPEED_CAP = capabilities["aboutisland47519.comfortMaxSpeed"]
+local HEAT_ASSIST_SPEED_CAP = capabilities["aboutisland47519.heatAssistSpeed"]
 -- 2nd rename, 2026-09-05: "heatAssistReversal" is a 3rd distinct
 -- capability id -- neither the original "heatAssistReverse" (whose
 -- cached schema validation permanently rejects the capitalized
@@ -67,11 +67,11 @@ local HEAT_ASSIST_SPEED_CAP = capabilities["examplens.heatAssistSpeed"]
 -- the full story). This one was created with a properly spaced `name`
 -- ("Heat Assist Reversal") and had its presentation+translation set
 -- BEFORE ever being wired into a device, to actually stick this time.
-local HEAT_ASSIST_REVERSE_CAP = capabilities["examplens.heatAssistReversal"]
-local MOTION_TIMEOUT_MINUTES_CAP = capabilities["examplens.motionTimeoutMinutes"]
-local UNOCCUPIED_BEHAVIOR_MODE_CAP = capabilities["examplens.unoccupiedBehaviorMode"]
-local UNOCCUPIED_BEHAVIOR_SPEED_CAP = capabilities["examplens.unoccupiedBehaviorSpeed"]
-local RETURN_TO_AUTO_MINUTES_CAP = capabilities["examplens.returnToAutoMinutes"]
+local HEAT_ASSIST_REVERSE_CAP = capabilities["aboutisland47519.heatAssistReversal"]
+local MOTION_TIMEOUT_MINUTES_CAP = capabilities["aboutisland47519.motionTimeoutMinutes"]
+local UNOCCUPIED_BEHAVIOR_MODE_CAP = capabilities["aboutisland47519.unoccupiedBehaviorMode"]
+local UNOCCUPIED_BEHAVIOR_SPEED_CAP = capabilities["aboutisland47519.unoccupiedBehaviorSpeed"]
+local RETURN_TO_AUTO_MINUTES_CAP = capabilities["aboutisland47519.returnToAutoMinutes"]
 
 -- Phantom show/hide switches for the Comfort/Heat/Motion/Return-to-Auto
 -- sections (2026-09-05, user request): same zero-hardware-backing pattern
@@ -102,10 +102,10 @@ local RETURN_TO_AUTO_MINUTES_CAP = capabilities["examplens.returnToAutoMinutes"]
 -- ever observed, there's no stale first-look to be stuck on. Attribute
 -- keys (`showComfort` etc) deliberately kept identical to gen 1 so none
 -- of the Lua below this point needed to change.
-local SHOW_COMFORT_CAP = capabilities["examplens.comfortSection"]
-local SHOW_HEAT_CAP = capabilities["examplens.heatSection"]
-local SHOW_MOTION_CAP = capabilities["examplens.motionSection"]
-local SHOW_RETURN_TO_AUTO_CAP = capabilities["examplens.returnToAutoSection"]
+local SHOW_COMFORT_CAP = capabilities["aboutisland47519.comfortSection"]
+local SHOW_HEAT_CAP = capabilities["aboutisland47519.heatSection"]
+local SHOW_MOTION_CAP = capabilities["aboutisland47519.motionSection"]
+local SHOW_RETURN_TO_AUTO_CAP = capabilities["aboutisland47519.returnToAutoSection"]
 
 -- The real hardware enable switches for the 4 sections above, 2026-09-05
 -- (2nd change same day): originally these used the shared stock `switch`
@@ -126,30 +126,30 @@ local SHOW_RETURN_TO_AUTO_CAP = capabilities["examplens.returnToAutoSection"]
 -- comfort/heat/motion/returnToAuto at all -- these 4 have their own
 -- dedicated handlers instead (see COMFORT_ENABLE_CAP.ID etc in
 -- command_handlers).
-local COMFORT_ENABLE_CAP = capabilities["examplens.comfortEnable"]
-local HEAT_ASSIST_ENABLE_CAP = capabilities["examplens.heatAssistEnable"]
-local MOTION_SENSE_ENABLE_CAP = capabilities["examplens.motionSenseEnable"]
-local RETURN_TO_AUTO_ENABLE_CAP = capabilities["examplens.returnToAutoEnable"]
+local COMFORT_ENABLE_CAP = capabilities["aboutisland47519.comfortEnable"]
+local HEAT_ASSIST_ENABLE_CAP = capabilities["aboutisland47519.heatAssistEnable"]
+local MOTION_SENSE_ENABLE_CAP = capabilities["aboutisland47519.motionSenseEnable"]
+local RETURN_TO_AUTO_ENABLE_CAP = capabilities["aboutisland47519.returnToAutoEnable"]
 
-local SLEEP_FAN_MODE_GATE_CAP = capabilities["examplens.sleepAutoModeGate"]
-local SLEEP_SPEED_CAP = capabilities["examplens.sleepSpeed"]
-local SLEEP_IDEAL_TEMP_CAP = capabilities["examplens.sleepIdealTemperature"]
-local SLEEP_TIMER_CAP = capabilities["examplens.sleepTimer"]
-local SLEEP_TIMER_END_SPEED_CAP = capabilities["examplens.sleepTimerEndSpeed"]
-local SLEEP_TIMER_DURATION_CAP = capabilities["examplens.sleepTimerDuration"]
-local SLEEP_RETURN_TO_AUTO_CAP = capabilities["examplens.sleepReturnToAuto"]
-local SLEEP_RETURN_TO_AUTO_DURATION_CAP = capabilities["examplens.sleepReturnToAutoDuration"]
-local SLEEP_BRIGHTNESS_MODE_CAP = capabilities["examplens.sleepBrightnessMode"]
+local SLEEP_FAN_MODE_GATE_CAP = capabilities["aboutisland47519.sleepAutoModeGate"]
+local SLEEP_SPEED_CAP = capabilities["aboutisland47519.sleepSpeed"]
+local SLEEP_IDEAL_TEMP_CAP = capabilities["aboutisland47519.sleepIdealTemperature"]
+local SLEEP_TIMER_CAP = capabilities["aboutisland47519.sleepTimer"]
+local SLEEP_TIMER_END_SPEED_CAP = capabilities["aboutisland47519.sleepTimerEndSpeed"]
+local SLEEP_TIMER_DURATION_CAP = capabilities["aboutisland47519.sleepTimerDuration"]
+local SLEEP_RETURN_TO_AUTO_CAP = capabilities["aboutisland47519.sleepReturnToAuto"]
+local SLEEP_RETURN_TO_AUTO_DURATION_CAP = capabilities["aboutisland47519.sleepReturnToAutoDuration"]
+local SLEEP_BRIGHTNESS_MODE_CAP = capabilities["aboutisland47519.sleepBrightnessMode"]
 -- Headless mirrors of sleepBrightnessMode/wakeUpMode (2026-08-29), same
 -- pattern and same reason as SLEEP_FAN_MODE_GATE_CAP above: sleepMode
 -- (the master Sleep Mode switch) has no effect on sleepBrightnessMode/
 -- wakeUpMode's own real value, so sleepBrightnessPercent/wakeUpBrightness/
 -- wakeUpMotionTimeout need to gate on THESE instead if they're to hide
 -- when Sleep Mode is off. See apply_sleep_status for the fold-in logic.
-local SLEEP_BRIGHTNESS_MODE_GATE_CAP = capabilities["examplens.sleepBrightnessModeGate"]
-local SLEEP_BRIGHTNESS_PERCENT_CAP = capabilities["examplens.sleepBrightnessPercent"]
-local WAKE_UP_MODE_CAP = capabilities["examplens.wakeUpMode"]
-local WAKE_UP_MODE_GATE_CAP = capabilities["examplens.wakeUpModeGate"]
+local SLEEP_BRIGHTNESS_MODE_GATE_CAP = capabilities["aboutisland47519.sleepBrightnessModeGate"]
+local SLEEP_BRIGHTNESS_PERCENT_CAP = capabilities["aboutisland47519.sleepBrightnessPercent"]
+local WAKE_UP_MODE_CAP = capabilities["aboutisland47519.wakeUpMode"]
+local WAKE_UP_MODE_GATE_CAP = capabilities["aboutisland47519.wakeUpModeGate"]
 -- wakeUpBrightness should show for BOTH wakeUpMode "On" and "Auto" (Wake
 -- Up brightness matters whenever the light does something at wake time),
 -- but visibleCondition only ever accepted a single EQUALS operand --
@@ -158,8 +158,8 @@ local WAKE_UP_MODE_GATE_CAP = capabilities["examplens.wakeUpModeGate"]
 -- true. Same fold-a-derived-gate pattern as the others: folds
 -- wakeUpModeGate's On/Auto/Off into a plain On/Off, so wakeUpBrightness
 -- can gate on a single EQUALS "On" against THIS instead.
-local WAKE_UP_BRIGHTNESS_GATE_CAP = capabilities["examplens.wakeUpBrightnessGate"]
-local WAKE_UP_BRIGHTNESS_CAP = capabilities["examplens.wakeUpBrightness"]
+local WAKE_UP_BRIGHTNESS_GATE_CAP = capabilities["aboutisland47519.wakeUpBrightnessGate"]
+local WAKE_UP_BRIGHTNESS_CAP = capabilities["aboutisland47519.wakeUpBrightness"]
 
 -- Schedule (2026-09-02, reworked 2026-09-03): binds SmartThings to the
 -- fan's own on-device schedules, decoded via baf.build_schedule_commit/
@@ -195,16 +195,16 @@ local WAKE_UP_BRIGHTNESS_CAP = capabilities["examplens.wakeUpBrightness"]
 -- this anymore (per explicit user direction: "my fans schedules arent
 -- production ready at the moment anyway") -- Show Schedule remains the
 -- only visibility gate, same as before.
-local SHOW_SCHEDULE_CAP = capabilities["examplens.showSchedule"]
-local SCHEDULE_ONE_EXISTS_CAP = capabilities["examplens.scheduleOneExists"]
-local SCHEDULE_TWO_EXISTS_CAP = capabilities["examplens.scheduleTwoExists"]
-local SCHEDULE_THREE_EXISTS_CAP = capabilities["examplens.scheduleThreeExists"]
-local FIRST_SCHEDULE_LABEL_CAP = capabilities["examplens.firstScheduleLabel"]
-local SECOND_SCHEDULE_LABEL_CAP = capabilities["examplens.secondScheduleLabel"]
-local THIRD_SCHEDULE_LABEL_CAP = capabilities["examplens.thirdScheduleLabel"]
-local SCHEDULE_ENABLED_CAP = capabilities["examplens.scheduleEnabled"]
-local SECOND_SCHEDULE_ENABLED_CAP = capabilities["examplens.secondScheduleEnabled"]
-local THIRD_SCHEDULE_ENABLED_CAP = capabilities["examplens.thirdScheduleEnabled"]
+local SHOW_SCHEDULE_CAP = capabilities["aboutisland47519.showSchedule"]
+local SCHEDULE_ONE_EXISTS_CAP = capabilities["aboutisland47519.scheduleOneExists"]
+local SCHEDULE_TWO_EXISTS_CAP = capabilities["aboutisland47519.scheduleTwoExists"]
+local SCHEDULE_THREE_EXISTS_CAP = capabilities["aboutisland47519.scheduleThreeExists"]
+local FIRST_SCHEDULE_LABEL_CAP = capabilities["aboutisland47519.firstScheduleLabel"]
+local SECOND_SCHEDULE_LABEL_CAP = capabilities["aboutisland47519.secondScheduleLabel"]
+local THIRD_SCHEDULE_LABEL_CAP = capabilities["aboutisland47519.thirdScheduleLabel"]
+local SCHEDULE_ENABLED_CAP = capabilities["aboutisland47519.scheduleEnabled"]
+local SECOND_SCHEDULE_ENABLED_CAP = capabilities["aboutisland47519.secondScheduleEnabled"]
+local THIRD_SCHEDULE_ENABLED_CAP = capabilities["aboutisland47519.thirdScheduleEnabled"]
 -- Slots 4/5 added 2026-09-04, per explicit user correction: the original
 -- requirement was to surface ALL named schedules, not just the first 3 --
 -- SmartThings has no way to render a truly unbounded list (every tile
@@ -212,13 +212,13 @@ local THIRD_SCHEDULE_ENABLED_CAP = capabilities["examplens.thirdScheduleEnabled"
 -- fan's firmware nor the official app documents any real maximum schedule
 -- count, so 5 was picked as a generous practical ceiling, not derived
 -- from a known limit. Same exact pattern as slots 1-3 in every respect.
-local SCHEDULE_FOUR_EXISTS_CAP = capabilities["examplens.scheduleFourExists"]
-local SCHEDULE_FIVE_EXISTS_CAP = capabilities["examplens.scheduleFiveExists"]
-local FOURTH_SCHEDULE_LABEL_CAP = capabilities["examplens.fourthScheduleLabel"]
-local FIFTH_SCHEDULE_LABEL_CAP = capabilities["examplens.fifthScheduleLabel"]
-local FOURTH_SCHEDULE_ENABLED_CAP = capabilities["examplens.fourthScheduleEnabled"]
-local FIFTH_SCHEDULE_ENABLED_CAP = capabilities["examplens.fifthScheduleEnabled"]
-local WAKE_UP_MOTION_TIMEOUT_CAP = capabilities["examplens.wakeUpMotionTimeout"]
+local SCHEDULE_FOUR_EXISTS_CAP = capabilities["aboutisland47519.scheduleFourExists"]
+local SCHEDULE_FIVE_EXISTS_CAP = capabilities["aboutisland47519.scheduleFiveExists"]
+local FOURTH_SCHEDULE_LABEL_CAP = capabilities["aboutisland47519.fourthScheduleLabel"]
+local FIFTH_SCHEDULE_LABEL_CAP = capabilities["aboutisland47519.fifthScheduleLabel"]
+local FOURTH_SCHEDULE_ENABLED_CAP = capabilities["aboutisland47519.fourthScheduleEnabled"]
+local FIFTH_SCHEDULE_ENABLED_CAP = capabilities["aboutisland47519.fifthScheduleEnabled"]
+local WAKE_UP_MOTION_TIMEOUT_CAP = capabilities["aboutisland47519.wakeUpMotionTimeout"]
 
 --- Auto-discovered schedule slots (Phase 1 of SCHEDULE_FEATURE_PLAN.md,
 --- reworked 2026-09-03) -- `index` is this slot's 1-based position in
@@ -424,7 +424,7 @@ local function apply_sleep_status(device, fan, light)
   -- poll cycles if one category's query failed) -- see the fold-in note
   -- on sleepAutoModeGate above for why "Off" is the only value that
   -- forces a hide and nil/anything else fails open.
-  local sleep_mode_state = device:get_latest_state("sleep", "examplens.sleepMode", "sleepMode")
+  local sleep_mode_state = device:get_latest_state("sleep", "aboutisland47519.sleepMode", "sleepMode")
   if fan then
     local sleep_fan_mode_str = OFF_ON_AUTO_TO_STRING[fan.sleep_fan_mode] or "Off"
     local gate_value = sleep_fan_mode_str
@@ -576,7 +576,7 @@ local function apply_schedule_status(driver, device)
   if not ip then
     return
   end
-  local show_schedule = device:get_latest_state("schedule", "examplens.showSchedule", "showSchedule")
+  local show_schedule = device:get_latest_state("schedule", "aboutisland47519.showSchedule", "showSchedule")
   local schedules, err = BafClient.query_schedules(ip, 5)
   if not schedules then
     log.warn("BAF schedule status query failed: " .. tostring(err))
@@ -993,7 +993,7 @@ local NO_LIGHT_PROFILE_ID = nil
 -- try_update_metadata calls have caused a disruptive "capabilities
 -- changed" dialog elsewhere in this exact driver's history -- see the
 -- info_changed oscillation writeup in the gotchas memory.
-local NO_LIGHT_NO_ADDFAN_PROFILE_ID = "a1b2c3d4-0000-3000-8000-000000000046"
+local NO_LIGHT_NO_ADDFAN_PROFILE_ID = "a9accf8f-1204-3d25-9b0a-0dd997ca9b46"
 
 local PROFILE_TO_ID = {
   [WITH_ADDFAN_PROFILE] = WITH_ADDFAN_PROFILE_ID,
@@ -1145,37 +1145,37 @@ end
 local function seed_phantom_switches(driver, device)
   local settings_component = device.profile.components.settings
   if settings_component and
-      device:get_latest_state("settings", "examplens.showSettings", "showSettings") == nil then
+      device:get_latest_state("settings", "aboutisland47519.showSettings", "showSettings") == nil then
     device:emit_component_event(settings_component,
       SHOW_SETTINGS_CAP.showSettings({ value = "On" }))
   end
   local schedule_component = device.profile.components.schedule
   if schedule_component and
-      device:get_latest_state("schedule", "examplens.showSchedule", "showSchedule") == nil then
+      device:get_latest_state("schedule", "aboutisland47519.showSchedule", "showSchedule") == nil then
     device:emit_component_event(schedule_component,
       SHOW_SCHEDULE_CAP.showSchedule({ value = "On" }))
   end
   local comfort_component = device.profile.components.comfort
   if comfort_component and
-      device:get_latest_state("comfort", "examplens.comfortSection", "showComfort") == nil then
+      device:get_latest_state("comfort", "aboutisland47519.comfortSection", "showComfort") == nil then
     device:emit_component_event(comfort_component,
       SHOW_COMFORT_CAP.showComfort({ value = "On" }))
   end
   local heat_component = device.profile.components.heat
   if heat_component and
-      device:get_latest_state("heat", "examplens.heatSection", "showHeat") == nil then
+      device:get_latest_state("heat", "aboutisland47519.heatSection", "showHeat") == nil then
     device:emit_component_event(heat_component,
       SHOW_HEAT_CAP.showHeat({ value = "On" }))
   end
   local motion_component = device.profile.components.motion
   if motion_component and
-      device:get_latest_state("motion", "examplens.motionSection", "showMotion") == nil then
+      device:get_latest_state("motion", "aboutisland47519.motionSection", "showMotion") == nil then
     device:emit_component_event(motion_component,
       SHOW_MOTION_CAP.showMotion({ value = "On" }))
   end
   local return_to_auto_component = device.profile.components.returnToAuto
   if return_to_auto_component and
-      device:get_latest_state("returnToAuto", "examplens.returnToAutoSection", "showReturnToAuto") == nil then
+      device:get_latest_state("returnToAuto", "aboutisland47519.returnToAutoSection", "showReturnToAuto") == nil then
     device:emit_component_event(return_to_auto_component,
       SHOW_RETURN_TO_AUTO_CAP.showReturnToAuto({ value = "On" }))
   end
@@ -1396,7 +1396,7 @@ local UNOCCUPIED_MODE_TO_ENUM = { turnOff = 0, smartMix = 1 }
 
 local function set_unoccupied_behavior_mode(driver, device, command)
   local mode = UNOCCUPIED_MODE_TO_ENUM[command.args.value] or 0
-  local current_speed = device:get_latest_state("motion", "examplens.unoccupiedBehaviorSpeed", "unoccupiedBehaviorSpeed") or 0
+  local current_speed = device:get_latest_state("motion", "aboutisland47519.unoccupiedBehaviorSpeed", "unoccupiedBehaviorSpeed") or 0
   send_commit(driver, device, {
     unoccupied_behavior = baf.encode_unoccupied_behavior(mode, current_speed),
   }, true)
@@ -1404,7 +1404,7 @@ end
 
 local function set_unoccupied_behavior_speed(driver, device, command)
   local speed = math.max(0, math.min(7, math.floor(command.args.value)))
-  local current_mode_str = device:get_latest_state("motion", "examplens.unoccupiedBehaviorMode", "unoccupiedBehaviorMode") or "turnOff"
+  local current_mode_str = device:get_latest_state("motion", "aboutisland47519.unoccupiedBehaviorMode", "unoccupiedBehaviorMode") or "turnOff"
   local mode = UNOCCUPIED_MODE_TO_ENUM[current_mode_str] or 0
   send_commit(driver, device, {
     unoccupied_behavior = baf.encode_unoccupied_behavior(mode, speed),

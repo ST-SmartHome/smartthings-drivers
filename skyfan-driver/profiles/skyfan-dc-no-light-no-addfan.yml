@@ -1,7 +1,7 @@
 name: skyfan-dc-no-light-no-addfan.v2
 metadata:
   mnmn: SmartThingsCommunity
-  vid: a1b2c3d4-0000-3000-8000-000000000004
+  vid: 0b1589ed-bdd4-3955-b9bf-948e0cee3121
 components:
   - id: main
     label: "Fan"
@@ -12,11 +12,11 @@ components:
         version: 1
       - id: refresh
         version: 1
-      - id: examplens.skyfanMode
+      - id: aboutisland47519.skyfanMode
         version: 1
-      - id: examplens.skyfanDirection
+      - id: aboutisland47519.skyfanDirection
         version: 1
-      - id: examplens.skyfanSleepTimer
+      - id: aboutisland47519.skyfanSleepTimer
         version: 1
     categories:
       - name: Fan

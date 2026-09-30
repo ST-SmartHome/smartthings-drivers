@@ -8,11 +8,11 @@ local socket = require "cosock.socket"
 
 local POLL_TIMER_FIELD = "poll_timer"
 
-local MODE_CAP = capabilities["examplens.skyfanMode"]
-local DIRECTION_CAP = capabilities["examplens.skyfanDirection"]
-local SLEEP_TIMER_CAP = capabilities["examplens.skyfanSleepTimer"]
-local ADD_ANOTHER_CAP = capabilities["examplens.addAnotherFan"]
-local COLOR_TEMP_CAP = capabilities["examplens.skyfanColorTemp"]
+local MODE_CAP = capabilities["aboutisland47519.skyfanMode"]
+local DIRECTION_CAP = capabilities["aboutisland47519.skyfanDirection"]
+local SLEEP_TIMER_CAP = capabilities["aboutisland47519.skyfanSleepTimer"]
+local ADD_ANOTHER_CAP = capabilities["aboutisland47519.addAnotherFan"]
+local COLOR_TEMP_CAP = capabilities["aboutisland47519.skyfanColorTemp"]
 
 -- work_mode (DP 19) is a genuine 3-value enum on the device, not a
 -- continuous Kelvin range — the physical remote controls it as a push
@@ -514,7 +514,7 @@ local ACTIVE_PROFILE_FIELD = "active_profile"
 -- now the REAL live value, confirmed empirically via a direct device read
 -- after the fix deployed (all 8 real fans landed here in one redeploy, no
 -- reboot needed) -- note this is NOT the same UUID as profile.yml's own
--- metadata.vid (a1b2c3d4-0000-3000-8000-000000000004): device.profile.id is
+-- metadata.vid (0b1589ed-bdd4-3955-b9bf-948e0cee3121): device.profile.id is
 -- the underlying DeviceProfile resource's own auto-generated ID, a
 -- different resource from the presentation vid, don't conflate the two
 -- again. NO_LIGHT_PROFILE_ID has no live device to confirm against right

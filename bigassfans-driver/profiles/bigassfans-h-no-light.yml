@@ -1,7 +1,7 @@
 name: bigassfans-h-no-light.v9
 metadata:
   mnmn: SmartThingsCommunity
-  vid: a1b2c3d4-0000-3000-8000-000000000001
+  vid: 9c22b8c5-6bd7-37a8-b4f3-0047aad6d492
 components:
   - id: main
     label: "Fan+Light"
@@ -12,70 +12,70 @@ components:
         version: 1
       - id: refresh
         version: 1
-      - id: examplens.fanMode
+      - id: aboutisland47519.fanMode
         version: 1
-      - id: examplens.fanDirection
+      - id: aboutisland47519.fanDirection
         version: 1
-      - id: examplens.whoosh
+      - id: aboutisland47519.whoosh
         version: 1
-      - id: examplens.ecoMode
+      - id: aboutisland47519.ecoMode
         version: 1
     categories:
       - name: Fan
   - id: management
     label: "Manage"
     capabilities:
-      - id: examplens.addAnotherFan
+      - id: aboutisland47519.addAnotherFan
         version: 1
   - id: settings
     label: "Device Settings"
     capabilities:
-      - id: examplens.showSettings
+      - id: aboutisland47519.showSettings
         version: 1
-      - id: examplens.ledIndicators
+      - id: aboutisland47519.ledIndicators
         version: 1
-      - id: examplens.fanBeep
+      - id: aboutisland47519.fanBeep
         version: 1
-      - id: examplens.legacyIrRemote
+      - id: aboutisland47519.legacyIrRemote
         version: 1
       - id: temperatureMeasurement
         version: 1
   - id: sleep
     label: "Sleep"
     capabilities:
-      - id: examplens.sleepMode
+      - id: aboutisland47519.sleepMode
         version: 1
-      - id: examplens.wakeUpMotionTimeout
+      - id: aboutisland47519.wakeUpMotionTimeout
         version: 1
-      - id: examplens.sleepAutoMode
+      - id: aboutisland47519.sleepAutoMode
         version: 1
-      - id: examplens.sleepAutoModeGate
+      - id: aboutisland47519.sleepAutoModeGate
         version: 1
-      - id: examplens.sleepSpeed
+      - id: aboutisland47519.sleepSpeed
         version: 1
-      - id: examplens.sleepIdealTemperature
+      - id: aboutisland47519.sleepIdealTemperature
         version: 1
-      - id: examplens.sleepTimer
+      - id: aboutisland47519.sleepTimer
         version: 1
-      - id: examplens.sleepTimerEndSpeed
+      - id: aboutisland47519.sleepTimerEndSpeed
         version: 1
-      - id: examplens.sleepTimerDuration
+      - id: aboutisland47519.sleepTimerDuration
         version: 1
-      - id: examplens.sleepReturnToAuto
+      - id: aboutisland47519.sleepReturnToAuto
         version: 1
-      - id: examplens.sleepReturnToAutoDuration
+      - id: aboutisland47519.sleepReturnToAutoDuration
         version: 1
-      - id: examplens.sleepBrightnessMode
+      - id: aboutisland47519.sleepBrightnessMode
         version: 1
-      - id: examplens.sleepBrightnessModeGate
+      - id: aboutisland47519.sleepBrightnessModeGate
         version: 1
-      - id: examplens.sleepBrightnessPercent
+      - id: aboutisland47519.sleepBrightnessPercent
         version: 1
-      - id: examplens.wakeUpMode
+      - id: aboutisland47519.wakeUpMode
         version: 1
-      - id: examplens.wakeUpModeGate
+      - id: aboutisland47519.wakeUpModeGate
         version: 1
-      - id: examplens.wakeUpBrightness
+      - id: aboutisland47519.wakeUpBrightness
         version: 1
 preferences:
   - title: "Manual IP Override"

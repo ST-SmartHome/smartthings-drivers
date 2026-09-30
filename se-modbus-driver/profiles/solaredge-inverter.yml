@@ -9,7 +9,7 @@ components:
         version: 1
       - id: temperatureMeasurement
         version: 1
-      - id: inverterStatus
+      - id: aboutisland47519.inverterStatus
         version: 1
       - id: refresh
         version: 1
@@ -20,7 +20,7 @@ components:
     capabilities:
       - id: powerMeter
         version: 1
-      - id: gridEnergy
+      - id: aboutisland47519.gridEnergy
         version: 1
     categories:
       - name: SolarPanel

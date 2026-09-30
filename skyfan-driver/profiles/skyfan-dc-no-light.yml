@@ -1,7 +1,7 @@
 name: skyfan-dc-no-light.v2
 metadata:
   mnmn: SmartThingsCommunity
-  vid: a1b2c3d4-0000-3000-8000-000000000003
+  vid: 9f5cfc4f-017c-377d-8d3f-9c70a93b8567
 components:
   - id: main
     label: "Fan"
@@ -12,18 +12,18 @@ components:
         version: 1
       - id: refresh
         version: 1
-      - id: examplens.skyfanMode
+      - id: aboutisland47519.skyfanMode
         version: 1
-      - id: examplens.skyfanDirection
+      - id: aboutisland47519.skyfanDirection
         version: 1
-      - id: examplens.skyfanSleepTimer
+      - id: aboutisland47519.skyfanSleepTimer
         version: 1
     categories:
       - name: Fan
   - id: management
     label: "Manage"
     capabilities:
-      - id: examplens.addAnotherFan
+      - id: aboutisland47519.addAnotherFan
         version: 1
 preferences:
   - title: "Fan IP Address"

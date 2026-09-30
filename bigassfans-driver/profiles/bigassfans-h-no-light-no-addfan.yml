@@ -1,7 +1,7 @@
 name: bigassfans-h-no-light-no-addfan.v46
 metadata:
   mnmn: SmartThingsCommunity
-  vid: a1b2c3d4-0000-3000-8000-000000000002
+  vid: 7451bc86-8235-3822-90ed-5ea3cb516cac
 components:
   - id: main
     label: "Fan+Light"
@@ -12,148 +12,148 @@ components:
         version: 1
       - id: refresh
         version: 1
-      - id: examplens.fanMode
+      - id: aboutisland47519.fanMode
         version: 1
-      - id: examplens.fanDirection
+      - id: aboutisland47519.fanDirection
         version: 1
-      - id: examplens.whoosh
+      - id: aboutisland47519.whoosh
         version: 1
-      - id: examplens.ecoMode
+      - id: aboutisland47519.ecoMode
         version: 1
     categories:
       - name: Fan
   - id: sleep
     label: "Sleep"
     capabilities:
-      - id: examplens.sleepMode
+      - id: aboutisland47519.sleepMode
         version: 1
-      - id: examplens.wakeUpMotionTimeout
+      - id: aboutisland47519.wakeUpMotionTimeout
         version: 1
-      - id: examplens.sleepAutoMode
+      - id: aboutisland47519.sleepAutoMode
         version: 1
-      - id: examplens.sleepAutoModeGate
+      - id: aboutisland47519.sleepAutoModeGate
         version: 1
-      - id: examplens.sleepSpeed
+      - id: aboutisland47519.sleepSpeed
         version: 1
-      - id: examplens.sleepIdealTemperature
+      - id: aboutisland47519.sleepIdealTemperature
         version: 1
-      - id: examplens.sleepTimer
+      - id: aboutisland47519.sleepTimer
         version: 1
-      - id: examplens.sleepTimerEndSpeed
+      - id: aboutisland47519.sleepTimerEndSpeed
         version: 1
-      - id: examplens.sleepTimerDuration
+      - id: aboutisland47519.sleepTimerDuration
         version: 1
-      - id: examplens.sleepReturnToAuto
+      - id: aboutisland47519.sleepReturnToAuto
         version: 1
-      - id: examplens.sleepReturnToAutoDuration
+      - id: aboutisland47519.sleepReturnToAutoDuration
         version: 1
-      - id: examplens.sleepBrightnessMode
+      - id: aboutisland47519.sleepBrightnessMode
         version: 1
-      - id: examplens.sleepBrightnessModeGate
+      - id: aboutisland47519.sleepBrightnessModeGate
         version: 1
-      - id: examplens.sleepBrightnessPercent
+      - id: aboutisland47519.sleepBrightnessPercent
         version: 1
-      - id: examplens.wakeUpMode
+      - id: aboutisland47519.wakeUpMode
         version: 1
-      - id: examplens.wakeUpModeGate
+      - id: aboutisland47519.wakeUpModeGate
         version: 1
-      - id: examplens.wakeUpBrightnessGate
+      - id: aboutisland47519.wakeUpBrightnessGate
         version: 1
-      - id: examplens.wakeUpBrightness
+      - id: aboutisland47519.wakeUpBrightness
         version: 1
   - id: comfort
     label: "Comfort"
     capabilities:
-      - id: examplens.comfortSection
+      - id: aboutisland47519.comfortSection
         version: 1
-      - id: examplens.comfortEnable
+      - id: aboutisland47519.comfortEnable
         version: 1
-      - id: examplens.comfortIdealTemp
+      - id: aboutisland47519.comfortIdealTemp
         version: 1
-      - id: examplens.comfortMinSpeed
+      - id: aboutisland47519.comfortMinSpeed
         version: 1
-      - id: examplens.comfortMaxSpeed
+      - id: aboutisland47519.comfortMaxSpeed
         version: 1
   - id: heat
     label: "Heat Assist"
     capabilities:
-      - id: examplens.heatSection
+      - id: aboutisland47519.heatSection
         version: 1
-      - id: examplens.heatAssistEnable
+      - id: aboutisland47519.heatAssistEnable
         version: 1
-      - id: examplens.heatAssistSpeed
+      - id: aboutisland47519.heatAssistSpeed
         version: 1
-      - id: examplens.heatAssistReversal
+      - id: aboutisland47519.heatAssistReversal
         version: 1
   - id: motion
     label: "Motion"
     capabilities:
-      - id: examplens.motionSection
+      - id: aboutisland47519.motionSection
         version: 1
-      - id: examplens.motionSenseEnable
+      - id: aboutisland47519.motionSenseEnable
         version: 1
-      - id: examplens.motionTimeoutMinutes
+      - id: aboutisland47519.motionTimeoutMinutes
         version: 1
-      - id: examplens.unoccupiedBehaviorMode
+      - id: aboutisland47519.unoccupiedBehaviorMode
         version: 1
-      - id: examplens.unoccupiedBehaviorSpeed
+      - id: aboutisland47519.unoccupiedBehaviorSpeed
         version: 1
   - id: returnToAuto
     label: "Return to Auto"
     capabilities:
-      - id: examplens.returnToAutoSection
+      - id: aboutisland47519.returnToAutoSection
         version: 1
-      - id: examplens.returnToAutoEnable
+      - id: aboutisland47519.returnToAutoEnable
         version: 1
-      - id: examplens.returnToAutoMinutes
+      - id: aboutisland47519.returnToAutoMinutes
         version: 1
   - id: settings
     label: "Device Settings"
     capabilities:
-      - id: examplens.showSettings
+      - id: aboutisland47519.showSettings
         version: 1
-      - id: examplens.ledIndicators
+      - id: aboutisland47519.ledIndicators
         version: 1
-      - id: examplens.fanBeep
+      - id: aboutisland47519.fanBeep
         version: 1
-      - id: examplens.legacyIrRemote
+      - id: aboutisland47519.legacyIrRemote
         version: 1
       - id: temperatureMeasurement
         version: 1
   - id: schedule
     label: "Schedule"
     capabilities:
-      - id: examplens.showSchedule
+      - id: aboutisland47519.showSchedule
         version: 1
-      - id: examplens.scheduleOneExists
+      - id: aboutisland47519.scheduleOneExists
         version: 1
-      - id: examplens.firstScheduleLabel
+      - id: aboutisland47519.firstScheduleLabel
         version: 1
-      - id: examplens.scheduleEnabled
+      - id: aboutisland47519.scheduleEnabled
         version: 1
-      - id: examplens.scheduleTwoExists
+      - id: aboutisland47519.scheduleTwoExists
         version: 1
-      - id: examplens.secondScheduleLabel
+      - id: aboutisland47519.secondScheduleLabel
         version: 1
-      - id: examplens.secondScheduleEnabled
+      - id: aboutisland47519.secondScheduleEnabled
         version: 1
-      - id: examplens.scheduleThreeExists
+      - id: aboutisland47519.scheduleThreeExists
         version: 1
-      - id: examplens.thirdScheduleLabel
+      - id: aboutisland47519.thirdScheduleLabel
         version: 1
-      - id: examplens.thirdScheduleEnabled
+      - id: aboutisland47519.thirdScheduleEnabled
         version: 1
-      - id: examplens.scheduleFourExists
+      - id: aboutisland47519.scheduleFourExists
         version: 1
-      - id: examplens.fourthScheduleLabel
+      - id: aboutisland47519.fourthScheduleLabel
         version: 1
-      - id: examplens.fourthScheduleEnabled
+      - id: aboutisland47519.fourthScheduleEnabled
         version: 1
-      - id: examplens.scheduleFiveExists
+      - id: aboutisland47519.scheduleFiveExists
         version: 1
-      - id: examplens.fifthScheduleLabel
+      - id: aboutisland47519.fifthScheduleLabel
         version: 1
-      - id: examplens.fifthScheduleEnabled
+      - id: aboutisland47519.fifthScheduleEnabled
         version: 1
 preferences:
   - title: "Manual IP Override"
