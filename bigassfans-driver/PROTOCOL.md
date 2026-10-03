@@ -170,6 +170,33 @@ Field 67 flipped 1 → 0 when a fan went from Auto to On, but stayed 0
 when the same fan went back to Auto, so it is **not** an Auto-mode flag.
 Meaning unknown.
 
+**Field 230 = fan configuration (size + mount), 2026-10-03.** A nested
+2-field submessage, matched against the official app's About Fan →
+"Configuration" line on two fans:
+
+| 230 value | App shows |
+|---|---|
+| `{1: 5, 2: 3}` | 52" (132 cm), Long Mount |
+| `{1: 4, 2: 2}` | 60" (152 cm), Short Mount |
+
+So sub-field 1 is a blade-size enum (4 = 60", 5 = 52") and sub-field 2
+is a mount enum (2 = Short, 3 = Long). Other sizes and mounts haven't
+been observed.
+
+- **It is read-only.** A local commit of `Properties{230: {1: 5, 2: 3}}`
+  got no acknowledgement or push, and a re-sweep showed the old value
+  unchanged. The app only displays it and has no setting for it.
+- **It's stored on the SenseMe board, not the motor.** A fan fitted
+  with a replacement board reported the donor fan's configuration
+  (60" Short) rather than its own (52" Long). Only the manufacturer can
+  correct it.
+- **Probably sets the speed → RPM mapping** (inferred, not
+  isolation-tested): the fan reporting 60" runs speed 5 at about 125 rpm
+  (field 63/64) against about 141 rpm on a correctly configured 52" fan.
+
+Field 109 also differs between these two fans (1 vs 0); meaning
+unknown.
+
 Also returned by the sweep but not modeled by this driver. Names from the
 upstream `aiobafi6.proto` where it has them (values not verified beyond
 being plausible):
@@ -190,5 +217,6 @@ being plausible):
 
 Not in the upstream schema at all: 3, 6 (a timezone string), 15, 59, 67,
 72, 82, 83, 89, 95, 96, 109, 113–116, 118, 126, 127, 140, 150, 153,
-171–175, 207 and 230. Of these, 116 and 127 read 2700 like the colour
-temperature fields; the rest are unidentified.
+171–175, 207 and 230. Of these, 230 is the fan configuration (above),
+and 116 and 127 read 2700 like the colour temperature fields; the rest
+are unidentified.
