@@ -7,10 +7,11 @@ Community thread: https://community.smartthings.com/t/st-edge-lan-driver-ventair
 ## Features
 
 - Fan: on/off, speed (1–5), mode (Normal/ECO/Sleep), direction, sleep timer.
-- Light (if fitted): on/off, brightness, colour (warm/natural/cool). The light is its own SmartThings device, so Alexa and Google see it.
+- Light (if fitted): on/off, brightness, colour (warm/natural/cool). The light is its own SmartThings device, so Alexa and Google see it. It's created once the fan first reports a light.
 - Multiple fans, via an "Add another fan" button.
 - Direction changes stop the fan first.
 - Commands are retried and verified by reading the state back.
+- Tuya protocol 3.3 and 3.5, detected per fan.
 
 ## Setup
 
@@ -19,10 +20,10 @@ Community thread: https://community.smartthings.com/t/st-edge-lan-driver-ventair
    - Error 28841002 means your Tuya IoT Core trial has expired. Extend it at iot.tuya.com (Cloud → Cloud Services → IoT Core).
 2. First fan: **Add Device → Scan Nearby**, then open the new device's settings and enter the IP, local key and device ID.
 3. More fans: press **Add another fan** on any Skyfan device, then fill in the new device's settings.
-4. For fans without a light, turn on **No Physical Light**.
+4. For fans without a light, turn on **No Physical Light**. This deletes the fan's light device if it has one; turning it off again recreates it (as a new device).
 5. Optionally, turn on **Hide 'Add Another Fan' Button** once all fans are added.
 
-Changes to **No Physical Light** and **Hide 'Add Another Fan' Button** take effect when the driver restarts (e.g. a hub reboot).
+Both settings take effect immediately. The **Protocol Version** setting is ignored; the protocol is detected automatically.
 
 ## Data points
 
@@ -39,14 +40,15 @@ Changes to **No Physical Light** and **Hide 'Add Another Fan' Button** take effe
 
 ## Limitations
 
-- Protocol 3.3 only.
+- Protocol 3.4 isn't supported.
 - A fan accepts one local connection at a time. Other local clients (e.g. Home Assistant) can collide with the driver.
 - Some units reset the first connection after being idle. The driver retries automatically.
 
 ## Source
 
 - `src/tuya_protocol.lua`: framing and AES encryption (protocol 3.3).
-- `src/tuya_client.lua`: one TCP connection per request.
+- `src/tuya35.lua`, `src/gcm.lua`: protocol 3.5 session handshake and AES-GCM.
+- `src/tuya_client.lua`: one TCP connection per request; picks 3.3 or 3.5 per fan.
 - `src/init.lua`: device handlers, polling, light child devices.
 - `src/discovery.lua`: creates the first device; later fans come from the button.
-- `src/lockbox`: bundled pure-Lua crypto (the platform has none).
+- `src/lockbox`: bundled pure-Lua crypto for 3.3 (the platform has none).

@@ -172,6 +172,9 @@ end
 --- polling timer of its own (see start_polling/device_init) and gets its
 --- state exclusively from the parent's own poll cycle below, so this
 --- stays one TCP connection per cycle per physical fan either way.
+-- Assigned further down, after ensure_light_child exists.
+local after_successful_poll
+
 local function poll_once(driver, device)
   local ok, err = pcall(function()
     if is_light_child(device) then
@@ -207,6 +210,10 @@ local function poll_once(driver, device)
     local child = find_light_child(driver, device)
     if child then
       apply_light_status(child, dps)
+    end
+
+    if after_successful_poll then
+      after_successful_poll(driver, device, dps)
     end
   end)
   if not ok then
@@ -261,10 +268,11 @@ end
 
 -- ===== Resilient writes (2026-09-25) =====
 --
--- Measured 2026-09-25: even with no commands being sent, a sizeable share
--- of status queries failed with "Connection reset by peer". A write
+-- Measured 2026-09-25: with no commands being sent at all, about 27% of
+-- status queries across the fleet failed with "Connection reset by peer"
+-- (13 of 48 in a 3-minute window, spread over at least 5 fans). A write
 -- goes over the same one-shot connection, and send_dp used to send once
--- and give up, so a command could be silently lost --
+-- and give up, so roughly one command in four could be silently lost --
 -- e.g. an Alexa group "turn off the lights" reaching only one of two fans.
 --
 -- Every write now:
@@ -517,19 +525,11 @@ local ACTIVE_PROFILE_FIELD = "active_profile"
 -- metadata.vid (0b1589ed-bdd4-3955-b9bf-948e0cee3121): device.profile.id is
 -- the underlying DeviceProfile resource's own auto-generated ID, a
 -- different resource from the presentation vid, don't conflate the two
--- again. NO_LIGHT_PROFILE_ID has no live device to confirm against right
--- now (every fan currently has hideAddFan=true) -- left nil rather than a
--- plausible-looking guessed UUID, same reasoning bigassfans-driver already
--- established: an honest nil (forces an unconditional switch attempt,
--- harmless by design) is safer than a wrong-looking-right value. Fill in
--- for real the same way this driver's other confirmed IDs were obtained:
--- toggle hideAddFan off on a no-light fan, let it switch, read
--- device.profile.id back. WITH_LIGHT_PROFILE_ID/NO_ADDFAN_PROFILE_ID are
--- untouched -- those two profiles have no vid (still embedded-config-only)
--- and no real device rests on them long enough for a stale ID here to
--- matter in practice.
-local WITH_LIGHT_PROFILE_ID = "07f4d74f-0463-378c-9796-87cd62302025"
-local NO_LIGHT_PROFILE_ID = nil
+-- again. 2026-10-09: all four IDs confirmed against live devices
+-- (WITH_LIGHT was stale at 07f4d74f…, a same-named older skyfan-dc.v6;
+-- NO_LIGHT read from a live device).
+local WITH_LIGHT_PROFILE_ID = "4d1b089c-3a48-3842-8480-ee15fb347a01"
+local NO_LIGHT_PROFILE_ID = "cef8b209-c1eb-394a-b1b6-7eaf8d0c26bb"
 local NO_ADDFAN_PROFILE_ID = "13d30ff3-d727-3988-b1ef-e761a6744bbf"
 local NO_LIGHT_NO_ADDFAN_PROFILE_ID = "eb4dc99c-d551-3e10-ad7d-32a214f98d69"
 
@@ -603,69 +603,40 @@ local function ensure_correct_profile(driver, device)
   device:set_field(ACTIVE_PROFILE_FIELD, target, { persist = true })
 end
 
--- 2026-09-02: live capability probe, so a genuinely no-light fan gets
--- detected automatically instead of requiring the user to know to set the
--- "No Physical Light" preference before first pairing. Confirmed
--- empirically against real hardware: a no-light fan's local status query
--- omits DP 15 (light switch) entirely -- not just reporting it false --
--- while a light-having fan's response includes "15":false explicitly when
--- the light happens to be off, ruling out "missing means default" as an
--- alternative explanation (that convention doesn't apply to this driver's
--- Tuya protocol the way it does to bigassfans-driver's i6 one). Fails
--- open (assumes light present) on anything other than a clean, successful
--- query that positively omits DP 15 -- an unconfigured device, a timeout,
--- or any other query failure must never skip creating a real fan's light
--- child.
-local function probe_has_light(device)
-  local s = get_settings(device)
-  if not s.ip or not s.local_key or not s.device_id then
-    return true
-  end
-  local dps, err = TuyaClient.query_status(s.ip, s.local_key, s.device_id, 5)
-  if not dps then
-    log.warn("Skyfan DC light-capability probe failed for " .. device.id ..
-      ", assuming light present: " .. tostring(err))
-    return true
-  end
-  return dps["15"] ~= nil
-end
+-- 2026-10-09: light-device lifecycle.
+-- Creation: only after a successful poll proves the fan has a light (DP 15
+-- present; a no-light fan omits it entirely, a light fan sends "15":false
+-- when off). The old probe ran at device creation, before the user had
+-- entered an IP, failed, and "failed open" into creating a light device for
+-- every new fan, including no-light ones.
+-- Deletion: ONLY when the user turns on No Physical Light. Detection never
+-- deletes, because a light device may be used in Alexa routines.
+local LIGHT_CHILD_REQUESTED_FIELD = "light_child_requested_at"
 
---- Creates a light-child device for this fan — automatic for every fan
---- with a physical light (confirmed working end-to-end via a real pilot
---- fan, see skyfan-driver-project-status memory), skipped
---- for a noLight device (nothing to split off), a device the live probe
---- above has already confirmed has no light hardware, or if called on a
---- child itself. Idempotent via find_light_child (observed state) and
---- PROBED_NO_LIGHT_FIELD (probe result), so safe to call on every init —
---- a fan already known one way or the other short-circuits before the
---- probe ever runs again. Deliberately does NOT also switch this device's
---- own profile in the same pass — ensure_correct_profile picks up
---- has_light_child / PROBED_NO_LIGHT_FIELD on whichever LATER init
---- actually observes them (naturally true here already, since both
---- try_create_device and this probe's own persisted field only take
---- effect after this call returns) — create-then-confirm-then-switch
---- stays two effectively-separate steps even though the code is textually
---- adjacent, so a failed/delayed creation can never leave the light
---- orphaned mid-migration.
-local function ensure_light_child(driver, device)
+local function ensure_light_child(driver, device, dps)
   if is_light_child(device) then
     return
   end
   if device.preferences and device.preferences.noLight then
     return
   end
-  if device:get_field(PROBED_NO_LIGHT_FIELD) == true then
-    return
-  end
   if find_light_child(driver, device) then
     return
   end
-  if not probe_has_light(device) then
-    log.info("Skyfan DC live probe found no light hardware for " .. device.id ..
-      ", skipping light-child creation")
-    device:set_field(PROBED_NO_LIGHT_FIELD, true, { persist = true })
+  if dps["15"] == nil then
+    if device:get_field(PROBED_NO_LIGHT_FIELD) ~= true then
+      log.info("Skyfan DC " .. tostring(device.label) .. " reports no light (no DP 15); not creating a light device")
+      device:set_field(PROBED_NO_LIGHT_FIELD, true, { persist = true })
+      ensure_correct_profile(driver, device)
+    end
     return
   end
+  -- Creation is asynchronous; don't re-request on every poll meanwhile.
+  local last = device:get_field(LIGHT_CHILD_REQUESTED_FIELD)
+  if last and os.time() - last < 300 then
+    return
+  end
+  device:set_field(LIGHT_CHILD_REQUESTED_FIELD, os.time())
   local label = (device.label or device.id) .. " Light"
   local ok, err = driver:try_create_device({
     type = "LAN",
@@ -684,8 +655,42 @@ local function ensure_light_child(driver, device)
   end
 end
 
+after_successful_poll = ensure_light_child
+
+--- Removes this fan's light device. Called only when the user turns No Physical Light on.
+local function delete_light_child(driver, device)
+  local child = find_light_child(driver, device)
+  if not child then
+    return
+  end
+  if type(driver.try_delete_device) == "function" then
+    local ok, err = pcall(driver.try_delete_device, driver, child.id)
+    log.info("Skyfan DC No Physical Light is on: deleting " .. tostring(child.label)
+      .. " (" .. tostring(ok) .. (err and (", " .. tostring(err)) or "") .. ")")
+  else
+    local names = {}
+    for _, t in ipairs({ driver, getmetatable(driver) and getmetatable(driver).__index or {} }) do
+      if type(t) == "table" then
+        for k in pairs(t) do
+          if tostring(k):lower():find("delete") or tostring(k):lower():find("remove") then
+            names[#names + 1] = tostring(k)
+          end
+        end
+      end
+    end
+    log.warn("Skyfan DC No Physical Light is on, but this hub has no try_delete_device; delete "
+      .. tostring(child.label) .. " manually. Delete/remove functions available: " .. table.concat(names, ", "))
+  end
+end
+
+local delete_api_logged = false
+
 local function device_init(driver, device)
   log.info("Skyfan DC device init: " .. device.id)
+  if not delete_api_logged then
+    delete_api_logged = true
+    log.info("Skyfan DC driver:try_delete_device available: " .. tostring(type(driver.try_delete_device) == "function"))
+  end
   if is_light_child(device) then
     -- No profile-switch logic (always LIGHT_CHILD_PROFILE, never
     -- changes) and no polling timer of its own — state comes entirely
@@ -697,12 +702,25 @@ local function device_init(driver, device)
   -- pattern/reasoning as the SolarEdge driver's migration, see
   -- smartthings-edge-driver-gotchas memory.
   ensure_correct_profile(driver, device)
-  ensure_light_child(driver, device)
+  -- Never delete at init: a noLight left on from older builds (where it
+  -- was harmless alongside a light child) would silently delete real
+  -- lights. Deletion happens only when the user turns noLight on.
+  log.info("Skyfan DC prefs for " .. tostring(device.label) .. ": noLight=" .. tostring(device.preferences and device.preferences.noLight)
+    .. " hideAddFan=" .. tostring(device.preferences and device.preferences.hideAddFan)
+    .. " light child=" .. tostring(find_light_child(driver, device) ~= nil))
   start_polling(driver, device)
 end
 
 local function device_added(driver, device)
   log.info("Skyfan DC device added: " .. device.id)
+  -- A new light child moves its fan onto a no-light profile; without
+  -- this the fan keeps its own light tile until the next restart.
+  if is_light_child(device) then
+    local parent = device:get_parent_device()
+    if parent then
+      ensure_correct_profile(driver, parent)
+    end
+  end
 end
 
 local function info_changed(driver, device, event, args)
@@ -724,6 +742,20 @@ local function info_changed(driver, device, event, args)
   -- driver restart to take effect, not an instant switch on save. Don't
   -- re-add this call without a real mechanism to detect "was this
   -- infoChanged caused by our own try_update_metadata" first.
+  --
+  -- 2026-10-09: that mechanism is the preferences diff. Our own
+  -- try_update_metadata never changes a preference, so its infoChanged
+  -- shows identical old/new values and can't loop. Only a real user edit
+  -- of noLight/hideAddFan triggers a switch here.
+  local old = args and args.old_st_store and args.old_st_store.preferences
+  if old and not is_light_child(device)
+    and (old.noLight ~= device.preferences.noLight or old.hideAddFan ~= device.preferences.hideAddFan) then
+    log.info("Skyfan DC noLight/hideAddFan changed on " .. tostring(device.label) .. ", re-checking profile")
+    ensure_correct_profile(driver, device)
+    if device.preferences.noLight and not old.noLight then
+      delete_light_child(driver, device)
+    end
+  end
   start_polling(driver, device)
 end
 
