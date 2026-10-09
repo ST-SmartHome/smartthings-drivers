@@ -1,4 +1,4 @@
-name: solaredge-inverter.v7
+name: solaredge-inverter-3ph.v3
 components:
   - id: main
     label: "Main"
@@ -23,6 +23,10 @@ components:
       - id: aboutisland47519.gridEnergy
         version: 1
       - id: aboutisland47519.gridPhaseOne
+        version: 1
+      - id: aboutisland47519.gridPhaseTwo
+        version: 1
+      - id: aboutisland47519.gridPhaseThree
         version: 1
     categories:
       - name: SolarPanel

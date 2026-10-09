@@ -1,4 +1,4 @@
-name: solaredge-inverter.v7
+name: solaredge-inverter-battery-3ph.v3
 components:
   - id: main
     label: "Main"
@@ -24,6 +24,10 @@ components:
         version: 1
       - id: aboutisland47519.gridPhaseOne
         version: 1
+      - id: aboutisland47519.gridPhaseTwo
+        version: 1
+      - id: aboutisland47519.gridPhaseThree
+        version: 1
     categories:
       - name: SolarPanel
   - id: dc
@@ -35,6 +39,19 @@ components:
         version: 1
     categories:
       - name: SolarPanel
+  - id: battery
+    label: "Battery"
+    capabilities:
+      - id: battery
+        version: 1
+      - id: aboutisland47519.batteryDetails
+        version: 1
+      - id: powerMeter
+        version: 1
+      - id: temperatureMeasurement
+        version: 1
+    categories:
+      - name: Battery
 preferences:
   - title: "Inverter IP Address"
     name: ipAddress

@@ -7,8 +7,40 @@ local SolarEdge = require "solaredge"
 
 local POLL_TIMER_FIELD = "poll_timer"
 local POLL_IN_PROGRESS_FIELD = "poll_in_progress"
+local HAS_BATTERY_FIELD = "has_battery"
+local THREE_PHASE_FIELD = "three_phase"
+-- Profile per detected hardware. Non-battery single-phase installs stay
+-- on CURRENT_PROFILE. Both detections are persisted and only
+-- ever switch ON, once, so profiles never oscillate.
+local CURRENT_PROFILE = "solaredge-inverter.v7"
+local BATTERY_PROFILE = "solaredge-inverter-battery.v3"
+local THREE_PHASE_PROFILE = "solaredge-inverter-3ph.v3"
+local BATTERY_THREE_PHASE_PROFILE = "solaredge-inverter-battery-3ph.v3"
+-- One row per phase (L1..L3): power, voltage and current.
+local PHASE_CAPS = {
+  capabilities["aboutisland47519.gridPhaseOne"],
+  capabilities["aboutisland47519.gridPhaseTwo"],
+  capabilities["aboutisland47519.gridPhaseThree"],
+}
+
+local function round(x, places)
+  local m = 10 ^ (places or 0)
+  local v = math.floor(x * m + 0.5) / m
+  if (places or 0) == 0 then return math.tointeger(v) or v end
+  return v
+end
+
+local function target_profile(device)
+  local batt = device:get_field(HAS_BATTERY_FIELD)
+  local three = device:get_field(THREE_PHASE_FIELD)
+  if batt and three then return BATTERY_THREE_PHASE_PROFILE end
+  if batt then return BATTERY_PROFILE end
+  if three then return THREE_PHASE_PROFILE end
+  return CURRENT_PROFILE
+end
 local STATUS_CAP = capabilities["aboutisland47519.inverterStatus"]
 local GRID_ENERGY_CAP = capabilities["aboutisland47519.gridEnergy"]
+local BATTERY_DETAILS_CAP = capabilities["aboutisland47519.batteryDetails"]
 
 local function get_settings(device)
   local prefs = device.preferences or {}
@@ -91,8 +123,90 @@ local function poll_once(driver, device)
         reading.grid_power_w, reading.grid_power_w >= 0 and "exporting" or "importing",
         reading.grid_exported_wh / 1000.0, reading.grid_imported_wh / 1000.0))
       device:emit_component_event(grid, capabilities.powerMeter.power({ value = reading.grid_power_w, unit = "W" }))
-      device:emit_component_event(grid, GRID_ENERGY_CAP.exported({ value = reading.grid_exported_wh / 1000.0, unit = "kWh" }))
-      device:emit_component_event(grid, GRID_ENERGY_CAP.imported({ value = reading.grid_imported_wh / 1000.0, unit = "kWh" }))
+      -- Whole kWh: lifetime totals in the thousands wrap their tile otherwise.
+      device:emit_component_event(grid, GRID_ENERGY_CAP.exported({ value = round(reading.grid_exported_wh / 1000.0), unit = "kWh" }))
+      device:emit_component_event(grid, GRID_ENERGY_CAP.imported({ value = round(reading.grid_imported_wh / 1000.0), unit = "kWh" }))
+    end
+
+    -- Per-phase grid power/voltage: only when the meter shows real voltage
+    -- on phases B and C (solaredge.lua decides). First detection switches
+    -- the profile once, same pattern as the battery below.
+    local ph = reading.grid_phases
+    local one = reading.grid_phase_one
+    if not ph and one and grid and device:supports_capability(PHASE_CAPS[1], "grid") then
+      -- Single phase: the one row shows L1's voltage and current too.
+      device:emit_component_event(grid, PHASE_CAPS[1].power({ value = round(one.power), unit = "W" }))
+      device:emit_component_event(grid, PHASE_CAPS[1].voltage({ value = round(one.voltage, 1), unit = "V" }))
+      device:emit_component_event(grid, PHASE_CAPS[1].current({ value = round(one.current, 1), unit = "A" }))
+    end
+    if ph then
+      if not device:get_field(THREE_PHASE_FIELD) then
+        device:set_field(THREE_PHASE_FIELD, true, { persist = true })
+        log.info("SolarEdge: three-phase grid meter detected, switching to profile " .. target_profile(device))
+        device:try_update_metadata({ profile = target_profile(device) })
+      end
+      log.info(string.format("SolarEdge grid phases: L1 %.0fW %.1fV %.1fA, L2 %.0fW %.1fV %.1fA, L3 %.0fW %.1fV %.1fA",
+        ph.power[1], ph.voltage[1], ph.current[1], ph.power[2], ph.voltage[2], ph.current[2],
+        ph.power[3], ph.voltage[3], ph.current[3]))
+      local gc = device.profile.components.grid
+      if gc and device:supports_capability(PHASE_CAPS[1], "grid") then
+        for i, cap in ipairs(PHASE_CAPS) do
+          -- Whole watts so "826 W" fits its cell without wrapping.
+          device:emit_component_event(gc, cap.power({ value = round(ph.power[i]), unit = "W" }))
+          device:emit_component_event(gc, cap.voltage({ value = round(ph.voltage[i], 1), unit = "V" }))
+          device:emit_component_event(gc, cap.current({ value = round(ph.current[i], 1), unit = "A" }))
+        end
+      end
+    end
+
+    -- Battery (StorEdge / hybrid) is optional hardware, read-only. The
+    -- first time one is detected, remember it and move the device to the
+    -- battery profile once (guarded by the persisted field, so this never
+    -- repeats or oscillates; installs without a battery never switch).
+    local batt = reading.battery
+    if batt then
+      if not device:get_field(HAS_BATTERY_FIELD) then
+        device:set_field(HAS_BATTERY_FIELD, true, { persist = true })
+        log.info(string.format("SolarEdge: battery detected (rated %.0f Wh), switching to profile %s",
+          batt.rated_energy_wh, target_profile(device)))
+        device:try_update_metadata({ profile = target_profile(device) })
+      end
+      log.info(string.format("SolarEdge battery: %s%%, %sW, %sV, %s, status=%s",
+        tostring(batt.soe_pct), tostring(batt.power_w), tostring(batt.voltage_v),
+        batt.temp_c and string.format("%.1fC", batt.temp_c) or "n/a", tostring(batt.status_name)))
+      local bc = device.profile.components.battery
+      if bc then
+        if batt.soe_pct then
+          local pct = math.floor(math.max(0, math.min(100, batt.soe_pct)) + 0.5)
+          device:emit_component_event(bc, capabilities.battery.battery({ value = pct }))
+        end
+        if batt.power_w then
+          device:emit_component_event(bc, capabilities.powerMeter.power({ value = batt.power_w, unit = "W" }))
+        end
+        -- No voltage tile: on hybrids (e.g. SE10K-RWB48 with a 48 V
+        -- battery) 0xE170 reported ~820 V = the inverter's DC bus, not the
+        -- battery terminals, so it was misleading. Still logged above.
+        if batt.temp_c then
+          device:emit_component_event(bc, capabilities.temperatureMeasurement.temperature({ value = batt.temp_c, unit = "C" }))
+        end
+        -- Battery Details: visible rows in the section (the standard battery
+        -- % only renders in the device header, which a tester missed).
+        if batt.status_name then
+          device:emit_component_event(bc, BATTERY_DETAILS_CAP.status({ value = batt.status_name }))
+        end
+        if batt.soe_pct then
+          local lvl = math.floor(math.max(0, math.min(100, batt.soe_pct)) * 10 + 0.5) / 10
+          device:emit_component_event(bc, BATTERY_DETAILS_CAP.chargeLevel({ value = lvl, unit = "%" }))
+        end
+        if batt.soh_pct then
+          local h = math.floor(math.max(0, math.min(100, batt.soh_pct)) * 10 + 0.5) / 10
+          device:emit_component_event(bc, BATTERY_DETAILS_CAP.health({ value = h, unit = "%" }))
+        end
+        if batt.energy_available_wh and batt.energy_available_wh >= 0 then
+          local kwh = math.floor(batt.energy_available_wh / 10 + 0.5) / 100
+          device:emit_component_event(bc, BATTERY_DETAILS_CAP.energyAvailable({ value = kwh, unit = "kWh" }))
+        end
+      end
     end
   end)
   device:set_field(POLL_IN_PROGRESS_FIELD, false)
@@ -129,19 +243,17 @@ local function start_polling(driver, device)
   poll_once(driver, device)
 end
 
-local CURRENT_PROFILE = "solaredge-inverter.v6"
 
 local function device_init(driver, device)
   log.info("SolarEdge device init (profile migration check): " .. device.id)
-  -- Migrate devices provisioned under an older profile name (e.g. adding
-  -- inverterStatus required bumping v1 -> v2, adding the dc component for
-  -- DC voltage/power required bumping v4 -> v5, since a profile's
-  -- detailView layout is generated once at profile-creation time and
-  -- doesn't regenerate just because the same-named profile's capability
-  -- list changes on a later repackage).
-  if device.profile.id ~= CURRENT_PROFILE then
-    log.info("SolarEdge migrating device from profile " .. tostring(device.profile.id) .. " to " .. CURRENT_PROFILE)
-    device:try_update_metadata({ profile = CURRENT_PROFILE })
+  -- Migrate devices provisioned under an older profile name. Capability
+  -- changes need a new profile name, since a profile's detailView layout
+  -- is generated once at creation and doesn't regenerate when the
+  -- same-named profile's capability list changes on a later repackage.
+  local target = target_profile(device)
+  if device.profile.id ~= target then
+    log.info("SolarEdge migrating device from profile " .. tostring(device.profile.id) .. " to " .. target)
+    device:try_update_metadata({ profile = target })
   end
   start_polling(driver, device)
 end
@@ -171,7 +283,7 @@ local function refresh_handler(driver, device, command)
   poll_once(driver, device)
 end
 
-local se_driver = Driver("se-modbus-v4", {
+local se_driver = Driver("se-modbus-tcp", {
   discovery = discovery.discovery_handler,
   lifecycle_handlers = {
     init = device_init,

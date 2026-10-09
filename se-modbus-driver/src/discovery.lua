@@ -7,23 +7,17 @@
 --- preferences (see profiles/solaredge-inverter.yml and init.lua's
 --- infoChanged handler).
 ---
---- This is deliberately the opposite of the previous (se-modbus-v2/v3) approach,
---- which gated on `searchParameters.ssdp` and consequently never invoked this
+--- This is deliberately the opposite of gating on `searchParameters.ssdp`,
+--- which never invoked this
 --- code at all — confirmed via a zero-output logcat capture during a live
 --- "Add Device" attempt.
 
 local log = require "log"
 
--- Kept in sync with init.lua's CURRENT_PROFILE (and profiles/solaredge-
--- inverter.yml's own name: field) -- this drifted to a stale "v4" for a
--- while after later bumps (v5, v6) only updated init.lua's migration
--- constant, not this one; see bigassfans-driver's "profile-name bump:
--- always two edits" gotcha for why that's a recurring risk. Harmless
--- today (this driver's one device already exists and never goes through
--- discovery again), but would silently request a nonexistent profile name
--- if this device were ever deleted and re-added, or the driver freshly
--- installed elsewhere.
-local PROFILE = "solaredge-inverter.v6"
+-- Must match init.lua's CURRENT_PROFILE and profiles/solaredge-inverter.yml's
+-- name: field, or a re-added device silently requests a profile that
+-- doesn't exist in the package.
+local PROFILE = "solaredge-inverter.v7"
 -- Static placeholder network id — this is not the inverter's real network
 -- identity (that's the IP, set later via preferences), just a stable id for
 -- the one discoverable device this driver offers.
