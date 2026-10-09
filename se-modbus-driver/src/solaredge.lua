@@ -63,6 +63,8 @@ local OFFSET = {
   AC_ENERGY_WH_HI = 23,  -- relative 22
   AC_ENERGY_WH_LO = 24,  -- relative 23
   AC_ENERGY_WH_SF = 25,  -- relative 24
+  DC_CURRENT = 26,       -- relative 25
+  DC_CURRENT_SF = 27,    -- relative 26
   DC_VOLTAGE = 28,       -- relative 27
   DC_VOLTAGE_SF = 29,    -- relative 28
   DC_POWER = 30,         -- relative 29
@@ -203,7 +205,7 @@ SolarEdge._read_battery = read_battery
 SolarEdge._meter_offset = METER_OFFSET
 
 --- Reads and parses one full sample from the inverter.
---- Returns { power_w, energy_wh, dc_voltage, dc_power_w, temp_c, status, status_name }
+--- Returns { power_w, energy_wh, dc_voltage, dc_current_a, dc_power_w, temp_c, status, status_name }
 --- or nil + error string.
 function SolarEdge.read(ip, port, unit_id, timeout_sec)
   local client, err = Modbus.connect(ip, port, timeout_sec)
@@ -262,6 +264,7 @@ function SolarEdge.read(ip, port, unit_id, timeout_sec)
 
   local power_w = scaled_signed16(regs, OFFSET.AC_POWER, OFFSET.AC_POWER_SF)
   local energy_wh = scaled_u32(regs, OFFSET.AC_ENERGY_WH_HI, OFFSET.AC_ENERGY_WH_LO, OFFSET.AC_ENERGY_WH_SF)
+  local dc_current_a = scaled_unsigned16(regs, OFFSET.DC_CURRENT, OFFSET.DC_CURRENT_SF)
   local dc_voltage = scaled_unsigned16(regs, OFFSET.DC_VOLTAGE, OFFSET.DC_VOLTAGE_SF)
   local dc_power_w = scaled_signed16(regs, OFFSET.DC_POWER, OFFSET.DC_POWER_SF)
 
@@ -317,6 +320,7 @@ function SolarEdge.read(ip, port, unit_id, timeout_sec)
     power_w = power_w,
     energy_wh = energy_wh,
     dc_voltage = dc_voltage,
+    dc_current_a = dc_current_a,
     dc_power_w = dc_power_w,
     temp_c = temp_c,
     status = status,

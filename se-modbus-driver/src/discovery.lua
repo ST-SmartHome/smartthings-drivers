@@ -17,7 +17,7 @@ local log = require "log"
 -- Must match init.lua's CURRENT_PROFILE and profiles/solaredge-inverter.yml's
 -- name: field, or a re-added device silently requests a profile that
 -- doesn't exist in the package.
-local PROFILE = "solaredge-inverter.v7"
+local PROFILE = "solaredge-inverter.v8"
 -- Static placeholder network id — this is not the inverter's real network
 -- identity (that's the IP, set later via preferences), just a stable id for
 -- the one discoverable device this driver offers.

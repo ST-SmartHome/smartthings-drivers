@@ -1,4 +1,4 @@
-name: solaredge-inverter-battery.v3
+name: solaredge-inverter-battery.v4
 components:
   - id: main
     label: "Main"
@@ -29,9 +29,9 @@ components:
   - id: dc
     label: "DC Input"
     capabilities:
-      - id: voltageMeasurement
-        version: 1
       - id: powerMeter
+        version: 1
+      - id: aboutisland47519.dcInput
         version: 1
     categories:
       - name: SolarPanel
@@ -40,7 +40,9 @@ components:
     capabilities:
       - id: battery
         version: 1
-      - id: aboutisland47519.batteryDetails
+      - id: aboutisland47519.batteryStatus
+        version: 1
+      - id: aboutisland47519.batteryStorage
         version: 1
       - id: powerMeter
         version: 1

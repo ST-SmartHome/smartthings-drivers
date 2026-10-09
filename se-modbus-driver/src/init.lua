@@ -12,10 +12,10 @@ local THREE_PHASE_FIELD = "three_phase"
 -- Profile per detected hardware. Non-battery single-phase installs stay
 -- on CURRENT_PROFILE. Both detections are persisted and only
 -- ever switch ON, once, so profiles never oscillate.
-local CURRENT_PROFILE = "solaredge-inverter.v7"
-local BATTERY_PROFILE = "solaredge-inverter-battery.v3"
-local THREE_PHASE_PROFILE = "solaredge-inverter-3ph.v3"
-local BATTERY_THREE_PHASE_PROFILE = "solaredge-inverter-battery-3ph.v3"
+local CURRENT_PROFILE = "solaredge-inverter.v8"
+local BATTERY_PROFILE = "solaredge-inverter-battery.v4"
+local THREE_PHASE_PROFILE = "solaredge-inverter-3ph.v4"
+local BATTERY_THREE_PHASE_PROFILE = "solaredge-inverter-battery-3ph.v4"
 -- One row per phase (L1..L3): power, voltage and current.
 local PHASE_CAPS = {
   capabilities["aboutisland47519.gridPhaseOne"],
@@ -40,7 +40,9 @@ local function target_profile(device)
 end
 local STATUS_CAP = capabilities["aboutisland47519.inverterStatus"]
 local GRID_ENERGY_CAP = capabilities["aboutisland47519.gridEnergy"]
-local BATTERY_DETAILS_CAP = capabilities["aboutisland47519.batteryDetails"]
+local DC_INPUT_CAP = capabilities["aboutisland47519.dcInput"]
+local BATTERY_STATUS_CAP = capabilities["aboutisland47519.batteryStatus"]
+local BATTERY_STORAGE_CAP = capabilities["aboutisland47519.batteryStorage"]
 
 local function get_settings(device)
   local prefs = device.preferences or {}
@@ -111,7 +113,11 @@ local function poll_once(driver, device)
     -- unlike the grid meter below.
     local dc = device.profile.components.dc
     if dc then
-      device:emit_component_event(dc, capabilities.voltageMeasurement.voltage({ value = reading.dc_voltage, unit = "V" }))
+      -- One "DC Input" row (Voltage, Current) under the power tile.
+      device:emit_component_event(dc, DC_INPUT_CAP.voltage({ value = round(reading.dc_voltage, 1), unit = "V" }))
+      if reading.dc_current_a then
+        device:emit_component_event(dc, DC_INPUT_CAP.current({ value = round(reading.dc_current_a, 1), unit = "A" }))
+      end
       device:emit_component_event(dc, capabilities.powerMeter.power({ value = reading.dc_power_w, unit = "W" }))
     end
 
@@ -189,22 +195,23 @@ local function poll_once(driver, device)
         if batt.temp_c then
           device:emit_component_event(bc, capabilities.temperatureMeasurement.temperature({ value = batt.temp_c, unit = "C" }))
         end
-        -- Battery Details: visible rows in the section (the standard battery
-        -- % only renders in the device header, which a tester missed).
+        -- Battery Status on its own line, then one Battery Storage row
+        -- (Charge Level, Health, Available): four values in one row wrapped
+        -- on Android. The standard battery % only renders in the header.
         if batt.status_name then
-          device:emit_component_event(bc, BATTERY_DETAILS_CAP.status({ value = batt.status_name }))
+          device:emit_component_event(bc, BATTERY_STATUS_CAP.status({ value = batt.status_name }))
         end
         if batt.soe_pct then
           local lvl = math.floor(math.max(0, math.min(100, batt.soe_pct)) * 10 + 0.5) / 10
-          device:emit_component_event(bc, BATTERY_DETAILS_CAP.chargeLevel({ value = lvl, unit = "%" }))
+          device:emit_component_event(bc, BATTERY_STORAGE_CAP.chargeLevel({ value = lvl, unit = "%" }))
         end
         if batt.soh_pct then
           local h = math.floor(math.max(0, math.min(100, batt.soh_pct)) * 10 + 0.5) / 10
-          device:emit_component_event(bc, BATTERY_DETAILS_CAP.health({ value = h, unit = "%" }))
+          device:emit_component_event(bc, BATTERY_STORAGE_CAP.health({ value = h, unit = "%" }))
         end
         if batt.energy_available_wh and batt.energy_available_wh >= 0 then
-          local kwh = math.floor(batt.energy_available_wh / 10 + 0.5) / 100
-          device:emit_component_event(bc, BATTERY_DETAILS_CAP.energyAvailable({ value = kwh, unit = "kWh" }))
+          local kwh = round(batt.energy_available_wh / 1000, 1)
+          device:emit_component_event(bc, BATTERY_STORAGE_CAP.energyAvailable({ value = kwh, unit = "kWh" }))
         end
       end
     end
