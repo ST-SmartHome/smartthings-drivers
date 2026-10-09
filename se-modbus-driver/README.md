@@ -1,93 +1,36 @@
 # se-modbus-tcp
 
-LAN Edge Driver for a SolarEdge inverter, controlling it over local Modbus
-TCP (SunSpec) rather than through SolarEdge's cloud API — no cloud
-dependency once set up. Distributed via a SmartThings channel invite
-(see the Community thread below).
+SmartThings Edge driver for SolarEdge inverters over local Modbus TCP (SunSpec); no cloud.
 
-**If you installed this driver before 2026-09-10**, it was previously
-registered as `se-modbus-v4`. That id has been retired in favor of this
-one (`se-modbus-tcp`) — see the Community thread below for how to switch
-your existing device over.
+Community thread: https://community.smartthings.com/t/st-edge-driver-solaredge-pv-inverter/310477
 
-**Discovery**: the inverter's Modbus TCP service is passive with no
-broadcast/SSDP of its own, so discovery doesn't gate on any network
-signal — `discovery.lua` creates one device unconditionally on "Scan
-Nearby", with a placeholder network ID. Real IP/port/unit ID are then
-entered as device **preferences** afterward (see
-`profiles/solaredge-inverter.yml`); `init.lua`'s `infoChanged` picks up
-preference changes and (re)starts polling.
+Installed before 2026-09-10? The driver was previously `se-modbus-v4`; see the thread for switching over.
 
-## Grid import/export meter
+## Setup
 
-If your installation has a SolarEdge production/consumption meter
-(SunSpec model 201–204), the driver reads it automatically in the same
-Modbus session and exposes a second `grid` component:
+1. Enable Modbus TCP on the inverter (SetApp or the installer menu). The default port is 1502.
+2. **Add Device → Scan Nearby** creates one "SolarEdge Inverter" device. The inverter doesn't announce itself on the network, so the driver can't find it on its own.
+3. In the device settings, enter the inverter's IP and port, Modbus unit ID (usually 1) and poll interval.
 
-- **`powerMeter`** — net grid power, **signed** (negative = importing,
-  positive = exporting). Already nets out household consumption, so use
-  this (not the inverter's own production figure) for a "only run if
-  there's solar surplus" condition.
-- **`gridEnergy`** (custom capability) — lifetime exported/imported
-  energy.
+## What shows up
 
-No meter present is a normal case — readings are simply omitted, not
-errored. `grid` shows up as its own selectable condition in Routines.
+| Section | Shows |
+|---|---|
+| Main | Output power, lifetime energy, temperature, status (MPPT, Throttled, Fault…), refresh |
+| Grid (if a SolarEdge meter is fitted) | Net grid power (+ export / − import), lifetime exported/imported energy |
+| DC | DC voltage and power from the panels |
 
-## Files
+Grid power already accounts for household use, so use it, not inverter output, for "solar surplus" Routines. Installs without a meter just don't show the Grid section.
 
-- `config.yml` — driver metadata, `lan` + `discovery` permissions.
-- `profiles/solaredge-inverter.yml` — capabilities (powerMeter,
-  energyMeter, temperatureMeasurement, refresh, plus `grid`/`dc`) and the
-  IP/port/unitId/pollInterval preferences.
-- `src/discovery.lua` — unconditional single-device creation.
-- `src/init.lua` — lifecycle handlers, preference-driven polling loop.
-- `src/modbus.lua` — minimal Modbus TCP client (Read Holding Registers,
-  function code 0x03), hand-rolled since the Lua sandbox has no Modbus
-  library — uses `cosock.socket` directly.
-- `src/solaredge.lua` — SunSpec inverter model (101/103) register map and
-  scale-factor math, plus the optional meter model (201–204) read.
+## Limitations
 
-## Status: working, verified live
+- The inverter accepts one Modbus connection at a time. Anything else polling it (Home Assistant, another driver) will collide. See the [solaredge-modbus-multi wiki](https://github.com/WillCodeForCats/solaredge-modbus-multi/wiki/Known-Issues).
+- One inverter per hub. With leader/follower inverters, only the unit set in the device's settings is read. The grid meter is normally on the leader, so the Grid section still covers the whole site.
 
-Confirmed via live `logcat` against a real SE5000AU — power, lifetime
-energy, DC voltage/power, temperature, and status all reporting sane,
-stable values, visible in the app. Example log shape (illustrative):
+## Source
 
-```
-SolarEdge reading: <W>W, <Wh> lifetime, <V> DC, <W> DC, <°C>, status=MPPT
-```
-
-Device preferences take an IP:port (sentinel `192.168.1.100:1502` — real
-LAN IP set per-install), Modbus unit ID (typically `1`), and poll
-interval (30s default).
-
-### What shows up in the app
-
-| Component | Capability | Shows |
-|---|---|---|
-| `main` | `powerMeter` | Live inverter output power (W) |
-| `main` | `energyMeter` | Lifetime energy produced (kWh) |
-| `main` | `temperatureMeasurement` | Inverter temperature (°C) |
-| `main` | `inverterStatus` | Operating status (MPPT/THROTTLED/FAULT/etc) |
-| `main` | `refresh` | Manual refresh button |
-| `grid` | `powerMeter` | Net grid power, signed |
-| `grid` | `gridEnergy` | Lifetime exported/imported energy (kWh) |
-| `dc` | `voltageMeasurement` | DC voltage before inversion |
-| `dc` | `powerMeter` | DC power before inversion |
-
-`inverterStatus` (OFF/SLEEPING/STARTING/MPPT/THROTTLED/SHUTTING_DOWN/
-FAULT/STANDBY) is a custom capability — no standard SmartThings
-capability fits inverter operating state.
-
-## Known limitation: one Modbus connection at a time
-
-SolarEdge inverters only accept a single Modbus TCP connection — a
-hardware/firmware constraint, not something any driver can work around.
-Anything else polling the same inverter (Home Assistant, another driver
-instance, SolarEdge's own tools) will collide with this one. Also
-documented in the [solaredge-modbus-multi wiki](https://github.com/WillCodeForCats/solaredge-modbus-multi/wiki/Known-Issues).
-
-## SmartThings Community
-
-https://community.smartthings.com/t/st-edge-driver-solaredge-pv-inverter/310477
+- `src/modbus.lua`: minimal Modbus TCP client (function 0x03).
+- `src/sunspec.lua`: SunSpec model discovery.
+- `src/solaredge.lua`: inverter (101/103) and meter (201–204) register maps and scale factors.
+- `src/init.lua`: lifecycle, polling, device events.
+- `src/discovery.lua`: creates the single device.
