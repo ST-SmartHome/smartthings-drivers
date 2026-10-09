@@ -514,20 +514,10 @@ local ACTIVE_PROFILE_FIELD = "active_profile"
 -- smartthings-edge-driver-gotchas memory) — but comparing it against its
 -- own real UUID is meaningful and is the only reliable source of truth for
 -- what profile a device is *actually* on right now.
--- 2026-09-02: the 2026-09-01 fanSpeed-range/direction-interlock work bumped
--- these two profiles (.v1->.v2, metadata.vid added) but never updated their
--- IDs here, so ensure_correct_profile kept comparing against the OLD
--- profile UUID and never once requested the switch, on any device, through
--- any number of redeploys or hub reboots. NO_LIGHT_NO_ADDFAN_PROFILE_ID is
--- now the REAL live value, confirmed empirically via a direct device read
--- after the fix deployed (all 8 real fans landed here in one redeploy, no
--- reboot needed) -- note this is NOT the same UUID as profile.yml's own
--- metadata.vid (0b1589ed-bdd4-3955-b9bf-948e0cee3121): device.profile.id is
--- the underlying DeviceProfile resource's own auto-generated ID, a
--- different resource from the presentation vid, don't conflate the two
--- again. 2026-10-09: all four IDs confirmed against live devices
--- (WITH_LIGHT was stale at 07f4d74f…, a same-named older skyfan-dc.v6;
--- NO_LIGHT read from a live device).
+-- A renamed profile gets a new UUID: update these with every rename,
+-- or ensure_correct_profile compares against a stale ID. device.profile.id
+-- is the DeviceProfile's own ID, not the presentation vid in the YAML's
+-- metadata. All four confirmed against live devices 2026-10-09.
 local WITH_LIGHT_PROFILE_ID = "4d1b089c-3a48-3842-8480-ee15fb347a01"
 local NO_LIGHT_PROFILE_ID = "cef8b209-c1eb-394a-b1b6-7eaf8d0c26bb"
 local NO_ADDFAN_PROFILE_ID = "13d30ff3-d727-3988-b1ef-e761a6744bbf"
@@ -698,7 +688,7 @@ local function device_init(driver, device)
     return
   end
   -- Also covers migrating devices provisioned under an older with-light
-  -- profile name (v1 -> v2 added the "Add another fan" button) — same
+  -- profile name — same
   -- pattern/reasoning as the SolarEdge driver's migration, see
   -- smartthings-edge-driver-gotchas memory.
   ensure_correct_profile(driver, device)

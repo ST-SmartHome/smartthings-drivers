@@ -31,7 +31,7 @@ local log = require "log"
 local socket = require "cosock.socket"
 local discovery_mdns = require "discovery_mdns"
 
-local PROFILE = "bigassfans-h.v1"
+local PROFILE = "bigassfans-h.v8" -- must match profiles/bigassfans-h.yml name:, or creation silently fails
 local IP_FIELD = "ip"
 local MANUAL_IP_SENTINEL = "0.0.0.0"
 

@@ -379,9 +379,8 @@ end
 --- Scale factor (÷100) confirmed against a real independent weather
 --- station, not just guessed -- see project-status memory for the
 --- verification. Lives on the `settings` component (moved there
---- 2026-08-27 at the user's request, alongside LED/Beep/IR -- profile
---- bumped to .v3 for the same detailView-caching reason as every other
---- capability-placement change in this driver) -- emit_component_event,
+--- 2026-08-27 at the user's request, alongside LED/Beep/IR) --
+--- emit_component_event,
 --- not plain emit_event, same reason as MORE_CAP_EMIT below: plain
 --- emit_event implicitly targets "main" and would silently no-op for a
 --- capability declared on a different component. Only the parent fan
@@ -641,6 +640,10 @@ end
 --- deliberate: giving the child its own timer would reintroduce the
 --- exact two-connections-per-cycle churn the 2026-08-13 query_multi fix
 --- eliminated (one TCP connect/close per poll, not two, per fan).
+-- Set below to ensure_light_child; called with each successful poll's
+-- SENSORS data so light creation waits for a real reply from the fan.
+local after_successful_poll
+
 local function poll_once(driver, device)
   local ok, err = pcall(function()
     if is_light_child(device) then
@@ -691,6 +694,9 @@ local function poll_once(driver, device)
     local child = find_light_child(driver, device)
     if child then
       apply_light_status(child, results.LIGHT)
+    end
+    if after_successful_poll then
+      after_successful_poll(driver, device, results.SENSORS)
     end
   end)
   if not ok then
@@ -939,10 +945,10 @@ end
 -- Same pattern as skyfan-driver's profile-switch mechanism (see
 -- smartthings-edge-driver-gotchas memory for the full history of bugs
 -- found building that one — both are already fixed here from the start):
--- only ever call ensure_correct_profile from device_init (never
--- info_changed — try_update_metadata appears to trigger its own new
--- info_changed as a side effect, which caused a real infinite oscillation
--- bug on skyfan-driver when this was called from there); compare
+-- don't call ensure_correct_profile from info_changed unconditionally
+-- (try_update_metadata triggers its own info_changed, which caused a real
+-- infinite oscillation on skyfan-driver); since 2026-10-09 info_changed
+-- calls it only on a real noLight/hideAddFan preference diff; compare
 -- device.profile.id (a real, live UUID) directly against known profile
 -- UUIDs rather than trusting any persisted "did we already ask" field as
 -- the reason to skip a switch — a persisted skip-guard silently blocked
@@ -953,46 +959,23 @@ end
 -- don't have the light kit fitted. The two pre-existing profile names are
 -- unchanged so no already-deployed device moves unless its preferences
 -- actually change.
--- 2026-08-27: bumped v1 -> v2 to add temperatureMeasurement to `main`,
--- then v2 -> v3 the same day to move it onto `settings` instead (user
--- request) -- same detailView-caching rule as the earlier inverterStatus
--- (se-modbus-driver) and skyfanColorTemp (skyfan-driver) bumps: a
--- same-named profile's cached detailView doesn't regenerate just because
--- its capability list changed on a later repackage. The v2->v3 profile
--- YAML rename briefly didn't get mirrored here -- these constants still
--- said v2 for a while, silently requesting a profile name that no
--- longer existed in the package, which is why the migration never took
--- effect across several redeploys and even a hub reboot. Real lesson:
--- a profile-name bump has TWO places that must move together, the YAML
--- file's own `name:` and whatever constant here requests it by name --
--- treat them as one edit, never one without the other.
+-- A capability change needs a new profile name: a same-named profile's
+-- cached detailView doesn't regenerate on repackage. A rename has TWO
+-- places that must move together, the YAML's `name:` and the constant
+-- here (plus discovery.lua's PROFILE) -- a mismatch silently requests a
+-- profile that doesn't exist in the package.
 local WITH_ADDFAN_PROFILE = "bigassfans-h.v8"
 local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v8"
-local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v9"
+local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v10"
 local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v46"
 
--- Real deviceIntegrationProfile UUIDs, confirmed via live device query.
--- All four reset to nil after the 2026-08-27 v2->v3 bump above (a new
--- profile version gets a new UUID once first created by a real deploy,
--- so any older UUID would be stale, not current) -- honest nil
--- until confirmed live again, same reasoning as WITH_ADDFAN_PROFILE_ID
--- already used below (ensure_correct_profile always
--- attempts a switch when it doesn't match, which is harmless while
--- nothing is on that profile).
-local WITH_ADDFAN_PROFILE_ID = nil
+-- Real deviceIntegrationProfile UUIDs, confirmed via live device reads
+-- (2026-10-09). A renamed profile gets a new UUID, so re-confirm after
+-- any rename. nil is safe: ensure_correct_profile then just requests the
+-- switch.
+local WITH_ADDFAN_PROFILE_ID = "fe5ba2a3-e3ac-34c6-8342-c21de42c82ad"
 local NO_ADDFAN_PROFILE_ID = nil
-local NO_LIGHT_PROFILE_ID = nil
--- Filled in via a live GET /v1/devices read on real hardware already
--- running this profile -- was left `nil` since the 2026-08-27 v2->v3
--- bump above, and nobody re-confirmed it against a live device after
--- later bumps (v3->...->v46). Left nil, `ensure_correct_profile`'s
--- "already on the right profile" check can never match a real device's
--- profile.id (a real UUID never equals nil), so every device_init was
--- unconditionally re-requesting a switch to a profile the device was
--- already correctly on. Harmless per se, but redundant
--- try_update_metadata calls have caused a disruptive "capabilities
--- changed" dialog elsewhere in this exact driver's history -- see the
--- info_changed oscillation writeup in the gotchas memory.
+local NO_LIGHT_PROFILE_ID = "4cc8d7ee-2f92-3b82-bb9e-9dfeb51493fb"
 local NO_LIGHT_NO_ADDFAN_PROFILE_ID = "a9accf8f-1204-3d25-9b0a-0dd997ca9b46"
 
 local PROFILE_TO_ID = {
@@ -1012,6 +995,7 @@ local PROFILE_TO_ID = {
 local function profile_for(device, has_light_child)
   local prefs = device.preferences or {}
   local no_light = prefs.noLight or has_light_child
+    or device:get_field("probed_no_light") == true
   if no_light and prefs.hideAddFan then
     return NO_LIGHT_NO_ADDFAN_PROFILE
   elseif no_light then
@@ -1074,34 +1058,40 @@ end
 --- query failure/timeout — an unreachable fan during pairing shouldn't
 --- silently end up without a light child it may well have; only a
 --- successful query that positively reports no light skips creation.
-local function ensure_light_child(driver, device)
+local PROBED_NO_LIGHT_FIELD = "probed_no_light"
+local LIGHT_CHILD_REQUESTED_FIELD = "light_child_requested_at"
+
+--- 2026-10-09: only ever runs from a successful poll (after_successful_poll),
+--- with that poll's SENSORS data. Fails CLOSED: no reply or no
+--- capabilities field means wait for the next poll, so a fan added
+--- before it's reachable never gets a light it may not have (the old
+--- device_init query failed open and created one regardless).
+local function ensure_light_child(driver, device, sensors)
   if is_light_child(device) then
-    return -- a child never spawns its own child
+    return false -- a child never spawns its own child
   end
   if device.preferences and device.preferences.noLight then
-    return -- no physical light kit on this unit — nothing to split off
+    return false
   end
   if find_light_child(driver, device) then
-    return -- already created
+    return false
   end
-  local ip = resolve_ip(device)
-  if ip then
-    local results, query_err = BafClient.query_multi(ip, { "SENSORS" }, 5)
-    local sensors = results and results.SENSORS
-    if sensors and sensors.capabilities ~= nil then
-      if not baf.decode_light_capability(sensors.capabilities) then
-        log.info("BAF fan " .. device.id ..
-          " reports no light capability (has_light/has_uplight both false) — skipping light-child creation")
-        return
-      end
-    else
-      log.info("BAF light-capability query for " .. device.id ..
-        " came back without a capabilities field (" .. tostring(query_err) ..
-        ") — creating light child anyway (fail-open)")
+  if not (sensors and sensors.capabilities ~= nil) then
+    return false -- no capability data in this reply; try next poll
+  end
+  if not baf.decode_light_capability(sensors.capabilities) then
+    if device:get_field(PROBED_NO_LIGHT_FIELD) ~= true then
+      device:set_field(PROBED_NO_LIGHT_FIELD, true, { persist = true })
+      log.info("BAF fan " .. tostring(device.label) .. " reports no light; no light device created")
+      ensure_correct_profile(driver, device)
     end
-  else
-    log.info("BAF light-capability check attempted before device has a known IP — creating light child anyway (fail-open)")
+    return false
   end
+  local requested = device:get_field(LIGHT_CHILD_REQUESTED_FIELD)
+  if requested and os.time() - requested < 300 then
+    return false -- creation already requested; give the platform time
+  end
+  device:set_field(LIGHT_CHILD_REQUESTED_FIELD, os.time())
   local label = (device.label or device.id) .. " Light"
   local ok, err = driver:try_create_device({
     type = "LAN",
@@ -1115,9 +1105,32 @@ local function ensure_light_child(driver, device)
   })
   if not ok and not tostring(err):find("DNI already exists") then
     log.error("BAF failed to create light-child device for " .. device.id .. ": " .. tostring(err))
-  else
-    log.info("BAF requested light-child device creation for " .. device.id)
+    return false
   end
+  log.info("BAF requested light-child device creation for " .. device.id)
+  return true
+end
+
+after_successful_poll = ensure_light_child
+
+--- Removes this fan's light device. Called only when the user turns No
+--- Physical Light on, never at init: a noLight left on from an older
+--- build would otherwise delete a real light (this happened on
+--- skyfan-driver, 2026-10-09).
+local function delete_light_child(driver, device)
+  local child = find_light_child(driver, device)
+  if not child then
+    return
+  end
+  if type(driver.try_delete_device) ~= "function" then
+    log.warn("BAF No Physical Light is on, but this hub has no try_delete_device; delete "
+      .. tostring(child.label) .. " manually")
+    return
+  end
+  local ok, err = pcall(driver.try_delete_device, driver, child.id)
+  device:set_field(LIGHT_CHILD_REQUESTED_FIELD, nil)
+  log.info("BAF No Physical Light turned on: deleting " .. tostring(child.label)
+    .. " (" .. tostring(ok) .. (err and (", " .. tostring(err)) or "") .. ")")
 end
 
 --- Seeds default values for the driver's 6 pure-local-UI-state phantom
@@ -1190,7 +1203,11 @@ local function device_init(driver, device)
     return
   end
   ensure_correct_profile(driver, device)
-  ensure_light_child(driver, device)
+  -- The light child is created from the first successful poll
+  -- (after_successful_poll), not here.
+  log.info("BAF prefs for " .. tostring(device.label) .. ": noLight=" .. tostring(device.preferences and device.preferences.noLight)
+    .. " hideAddFan=" .. tostring(device.preferences and device.preferences.hideAddFan)
+    .. " light child=" .. tostring(find_light_child(driver, device) ~= nil))
   seed_phantom_switches(driver, device)
   -- Real, network-dependent status -- wrapped in pcall like poll_once,
   -- for the same reason: an uncaught error here must never stop
@@ -1204,11 +1221,43 @@ end
 
 local function device_added(driver, device)
   log.info("BAF device added: " .. device.id)
+  -- A new light child moves its fan onto a no-light profile; without
+  -- this the fan keeps its own light tile until the next restart.
+  if is_light_child(device) then
+    local parent = device:get_parent_device()
+    if parent then
+      ensure_correct_profile(driver, parent)
+    end
+  end
   discovery.apply_cached_ip(driver, device)
 end
 
 local function info_changed(driver, device, event, args)
   log.info("BAF preferences changed, restarting polling")
+  -- 2026-10-09: noLight/hideAddFan now apply on save. The 08-2x rule
+  -- above (never switch profiles from info_changed) guarded against a
+  -- loop: try_update_metadata fires its own infoChanged. That one
+  -- carries identical old/new preferences, so acting only on a real
+  -- preference diff can't loop. Proven on skyfan-driver first.
+  local old = args and args.old_st_store and args.old_st_store.preferences
+  local prefs = device.preferences or {}
+  if old and not is_light_child(device)
+    and (old.noLight ~= prefs.noLight or old.hideAddFan ~= prefs.hideAddFan) then
+    log.info("BAF noLight/hideAddFan changed on " .. tostring(device.label) .. ", re-checking profile")
+    local child_requested = false
+    if prefs.noLight and not old.noLight then
+      delete_light_child(driver, device)
+    elseif old.noLight and not prefs.noLight then
+      -- Poll now; a reply reporting a light creates the child.
+      device:set_field(LIGHT_CHILD_REQUESTED_FIELD, nil)
+      poll_once(driver, device)
+      child_requested = device:get_field(LIGHT_CHILD_REQUESTED_FIELD) ~= nil
+    end
+    -- A requested child switches the profile itself via device_added.
+    if not child_requested then
+      ensure_correct_profile(driver, device)
+    end
+  end
   -- Defensive retry for the phantom-switch seed (see
   -- seed_phantom_switches' own comment) -- harmless no-op on a light
   -- child (its profile has none of the relevant components) and on any

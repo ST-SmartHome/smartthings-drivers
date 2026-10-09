@@ -26,8 +26,10 @@ Community thread: https://community.smartthings.com/t/st-edge-driver-big-a-fans-
 Settings:
 - **Manual IP Override**: `0.0.0.0` means use discovery.
 - **Poll Interval**.
-- **No Physical Light**.
+- **No Physical Light**: turning it on deletes the fan's light device; turning it off recreates it (as a new device).
 - **Hide 'Add Another Fan' Button**: the button covers fans that discovery misses.
+
+Settings take effect when saved. A fan's light device is created after the fan first replies to a poll and reports a light, so a fan added before it's reachable doesn't get one.
 
 ## Limitations
 

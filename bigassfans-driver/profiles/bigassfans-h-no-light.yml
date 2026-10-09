@@ -1,7 +1,7 @@
-name: bigassfans-h-no-light.v9
+name: bigassfans-h-no-light.v10
 metadata:
   mnmn: SmartThingsCommunity
-  vid: 9c22b8c5-6bd7-37a8-b4f3-0047aad6d492
+  vid: 14ad7524-a9f9-3ab6-95f9-dd97861877b9
 components:
   - id: main
     label: "Fan+Light"
@@ -22,24 +22,6 @@ components:
         version: 1
     categories:
       - name: Fan
-  - id: management
-    label: "Manage"
-    capabilities:
-      - id: aboutisland47519.addAnotherFan
-        version: 1
-  - id: settings
-    label: "Device Settings"
-    capabilities:
-      - id: aboutisland47519.showSettings
-        version: 1
-      - id: aboutisland47519.ledIndicators
-        version: 1
-      - id: aboutisland47519.fanBeep
-        version: 1
-      - id: aboutisland47519.legacyIrRemote
-        version: 1
-      - id: temperatureMeasurement
-        version: 1
   - id: sleep
     label: "Sleep"
     capabilities:
@@ -75,7 +57,108 @@ components:
         version: 1
       - id: aboutisland47519.wakeUpModeGate
         version: 1
+      - id: aboutisland47519.wakeUpBrightnessGate
+        version: 1
       - id: aboutisland47519.wakeUpBrightness
+        version: 1
+  - id: comfort
+    label: "Comfort"
+    capabilities:
+      - id: aboutisland47519.comfortSection
+        version: 1
+      - id: aboutisland47519.comfortEnable
+        version: 1
+      - id: aboutisland47519.comfortIdealTemp
+        version: 1
+      - id: aboutisland47519.comfortMinSpeed
+        version: 1
+      - id: aboutisland47519.comfortMaxSpeed
+        version: 1
+  - id: heat
+    label: "Heat Assist"
+    capabilities:
+      - id: aboutisland47519.heatSection
+        version: 1
+      - id: aboutisland47519.heatAssistEnable
+        version: 1
+      - id: aboutisland47519.heatAssistSpeed
+        version: 1
+      - id: aboutisland47519.heatAssistReversal
+        version: 1
+  - id: motion
+    label: "Motion"
+    capabilities:
+      - id: aboutisland47519.motionSection
+        version: 1
+      - id: aboutisland47519.motionSenseEnable
+        version: 1
+      - id: aboutisland47519.motionTimeoutMinutes
+        version: 1
+      - id: aboutisland47519.unoccupiedBehaviorMode
+        version: 1
+      - id: aboutisland47519.unoccupiedBehaviorSpeed
+        version: 1
+  - id: returnToAuto
+    label: "Return to Auto"
+    capabilities:
+      - id: aboutisland47519.returnToAutoSection
+        version: 1
+      - id: aboutisland47519.returnToAutoEnable
+        version: 1
+      - id: aboutisland47519.returnToAutoMinutes
+        version: 1
+  - id: settings
+    label: "Device Settings"
+    capabilities:
+      - id: aboutisland47519.showSettings
+        version: 1
+      - id: aboutisland47519.ledIndicators
+        version: 1
+      - id: aboutisland47519.fanBeep
+        version: 1
+      - id: aboutisland47519.legacyIrRemote
+        version: 1
+      - id: temperatureMeasurement
+        version: 1
+  - id: schedule
+    label: "Schedule"
+    capabilities:
+      - id: aboutisland47519.showSchedule
+        version: 1
+      - id: aboutisland47519.scheduleOneExists
+        version: 1
+      - id: aboutisland47519.firstScheduleLabel
+        version: 1
+      - id: aboutisland47519.scheduleEnabled
+        version: 1
+      - id: aboutisland47519.scheduleTwoExists
+        version: 1
+      - id: aboutisland47519.secondScheduleLabel
+        version: 1
+      - id: aboutisland47519.secondScheduleEnabled
+        version: 1
+      - id: aboutisland47519.scheduleThreeExists
+        version: 1
+      - id: aboutisland47519.thirdScheduleLabel
+        version: 1
+      - id: aboutisland47519.thirdScheduleEnabled
+        version: 1
+      - id: aboutisland47519.scheduleFourExists
+        version: 1
+      - id: aboutisland47519.fourthScheduleLabel
+        version: 1
+      - id: aboutisland47519.fourthScheduleEnabled
+        version: 1
+      - id: aboutisland47519.scheduleFiveExists
+        version: 1
+      - id: aboutisland47519.fifthScheduleLabel
+        version: 1
+      - id: aboutisland47519.fifthScheduleEnabled
+        version: 1
+  - id: management
+    label: "Manage"
+    capabilities:
+      - id: aboutisland47519.addAnotherFan
         version: 1
 preferences:
   - title: "Manual IP Override"
