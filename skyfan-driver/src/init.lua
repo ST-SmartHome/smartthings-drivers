@@ -175,6 +175,76 @@ end
 -- Assigned further down, after ensure_light_child exists.
 local after_successful_poll
 
+-- ===== Connection health (2026-10-10) =====
+-- A wrong local key still reaches the fan, but its reply can't be decoded.
+-- That case marks the device offline at once and backs off to one try every
+-- KEY_BACKOFF_SECONDS until the user saves new settings (info_changed clears
+-- the backoff). Plain network failures mark it offline only after
+-- OFFLINE_AFTER_FAILURES polls in a row, since single resets are routine.
+local KEY_BACKOFF_SECONDS = 300
+local OFFLINE_AFTER_FAILURES = 3
+local KEY_BACKOFF_UNTIL_FIELD = "key_backoff_until"
+local FAILURES_FIELD = "consecutive_poll_failures"
+local OFFLINE_FIELD = "marked_offline"
+
+local KEY_ERROR_PATTERNS = { "not a table", "decrypt failed", "HMAC", "no dps field", "wrong local key" }
+
+local function is_key_error(err)
+  local text = tostring(err)
+  for _, pattern in ipairs(KEY_ERROR_PATTERNS) do
+    if text:find(pattern, 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+--- Returns a description of an obviously bad setting, or nil.
+local function settings_problem(s)
+  if s.local_key == "0000000000000000" or s.device_id == "00000000000000000000" then
+    return "Local Key or Device ID is still the placeholder"
+  end
+  if s.local_key:find("[\128-\255]") then
+    return "Local Key contains a non-ASCII character (often a curly quote or dash inserted by the phone keyboard); paste it again"
+  end
+  if #s.local_key ~= 16 then
+    return "Local Key is " .. #s.local_key .. " bytes, not 16"
+  end
+  return nil
+end
+
+local function mark_offline(device, reason)
+  if not device:get_field(OFFLINE_FIELD) then
+    device:offline()
+    device:set_field(OFFLINE_FIELD, true)
+  end
+  log.error("Skyfan DC " .. tostring(device.label) .. " offline: " .. reason)
+end
+
+local function mark_online(device)
+  device:set_field(FAILURES_FIELD, 0)
+  device:set_field(KEY_BACKOFF_UNTIL_FIELD, nil)
+  if device:get_field(OFFLINE_FIELD) then
+    device:online()
+    device:set_field(OFFLINE_FIELD, false)
+    log.info("Skyfan DC " .. tostring(device.label) .. " back online")
+  end
+end
+
+local function record_failure(device, err)
+  if is_key_error(err) then
+    device:set_field(KEY_BACKOFF_UNTIL_FIELD, os.time() + KEY_BACKOFF_SECONDS)
+    mark_offline(device, "the fan answered but its reply can't be decoded. Check the Local Key and Device ID ("
+      .. tostring(err) .. "). Retrying every " .. KEY_BACKOFF_SECONDS .. " s until the settings change")
+    return
+  end
+  local failures = (device:get_field(FAILURES_FIELD) or 0) + 1
+  device:set_field(FAILURES_FIELD, failures)
+  if failures >= OFFLINE_AFTER_FAILURES then
+    mark_offline(device, failures .. " polls in a row failed: " .. tostring(err) .. ". Check the IP address and that the fan has power")
+  end
+end
+
 local function poll_once(driver, device)
   local ok, err = pcall(function()
     if is_light_child(device) then
@@ -185,21 +255,30 @@ local function poll_once(driver, device)
       log.warn("Skyfan DC device missing IP/local_key/device_id — skipping poll")
       return
     end
+    local problem = settings_problem(s)
+    if problem then
+      mark_offline(device, problem)
+      return
+    end
+    local backoff_until = device:get_field(KEY_BACKOFF_UNTIL_FIELD)
+    if backoff_until and os.time() < backoff_until then
+      return
+    end
 
     local dps, query_err = TuyaClient.query_status(s.ip, s.local_key, s.device_id, 5)
-    if not dps then
+    if not dps and not is_key_error(query_err) then
       -- 2026-09-25: some fans reset the first connection after an idle
       -- gap but accept one made moments later (reproduced off-hub: RST,
       -- then OK 0.5s later), so retry once.
       log.warn("Skyfan DC poll attempt 1 failed (" .. tostring(device.label) .. "): " .. tostring(query_err))
       socket.sleep(0.75)
       dps, query_err = TuyaClient.query_status(s.ip, s.local_key, s.device_id, 5)
-      if not dps then
-        log.error("Skyfan DC poll failed (" .. tostring(device.label) .. "): " .. tostring(query_err))
-        return
-      end
-      log.info("Skyfan DC poll retry succeeded (" .. tostring(device.label) .. ")")
     end
+    if not dps then
+      record_failure(device, query_err)
+      return
+    end
+    mark_online(device)
 
     log.info("Skyfan DC status: " .. (require "dkjson").encode(dps))
     apply_fan_status(device, dps)
@@ -715,6 +794,9 @@ end
 
 local function info_changed(driver, device, event, args)
   log.info("Skyfan DC preferences changed")
+  -- New settings get an immediate try, even during a wrong-key backoff.
+  device:set_field(KEY_BACKOFF_UNTIL_FIELD, nil)
+  device:set_field(FAILURES_FIELD, 0)
   -- EMERGENCY FIX, 2026-08-19: do NOT call ensure_correct_profile here.
   -- device:try_update_metadata appears to itself trigger a new infoChanged
   -- lifecycle event as a side effect of the profile actually changing —

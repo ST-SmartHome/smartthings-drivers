@@ -25,6 +25,8 @@ Community thread: https://community.smartthings.com/t/st-edge-lan-driver-ventair
 
 Both settings take effect immediately. The **Protocol Version** setting is ignored; the protocol is detected automatically.
 
+A fan shows **offline** if its local key or device ID is wrong (it answers but its reply can't be decoded), or after 3 failed polls in a row. Paste the key rather than typing it: phone keyboards can swap in curly quotes or dashes. Saving the settings retries immediately.
+
 ## Data points
 
 | DP | Code | Values | Shown as |
