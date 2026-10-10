@@ -1,0 +1,77 @@
+name: hunterpacific-fan.v3
+metadata:
+  mnmn: SmartThingsCommunity
+  vid: 9d5eca85-db8a-39a9-8634-41a0b28d5d64
+components:
+  - id: main
+    label: "Fan"
+    capabilities:
+      - id: switch
+        version: 1
+      - id: fanSpeed
+        version: 1
+      - id: aboutisland47519.fanDirection
+        version: 1
+      - id: refresh
+        version: 1
+    categories:
+      - name: Fan
+  - id: management
+    label: "Manage"
+    capabilities:
+      - id: aboutisland47519.addAnotherFan
+        version: 1
+preferences:
+  - title: "Fan IP Address"
+    name: ipAddress
+    description: "Local LAN IP of the fan's WiFi module, e.g. 192.168.1.100"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      minLength: 7
+      maxLength: 15
+      default: "192.168.1.100"
+  - title: "Local Key"
+    name: localKey
+    description: "16-character local_key from the Tuya IoT Platform device details — REQUIRED, must be changed from this placeholder"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      minLength: 16
+      maxLength: 16
+      default: "0000000000000000"
+  - title: "Device ID"
+    name: deviceId
+    description: "Tuya device ID / virtual ID — REQUIRED, must be changed from this placeholder"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: text
+      minLength: 20
+      maxLength: 25
+      default: "00000000000000000000"
+  - title: "Poll Interval (seconds)"
+    name: pollInterval
+    description: "How often to query the fan's status over the local connection"
+    required: true
+    preferenceType: integer
+    definition:
+      minimum: 10
+      maximum: 3600
+      default: 30
+  - title: "Light Kit Fitted"
+    name: lightFitted
+    description: "Turn on only if a light kit is installed. The fan's WiFi module reports a light either way, so this can't be detected automatically"
+    required: false
+    preferenceType: boolean
+    definition:
+      default: false
+  - title: "Hide 'Add Another Fan' Button"
+    name: hideAddFan
+    description: "Enable to remove the 'Add another fan' button from this device's screen — useful once you've already added every fan you have"
+    required: false
+    preferenceType: boolean
+    definition:
+      default: false

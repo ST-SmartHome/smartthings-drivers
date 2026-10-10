@@ -6,6 +6,9 @@ cloud dependency once set up.
 
 - **[skyfan-driver](skyfan-driver/)** (`skyfan-tuya-lan`) — Ventair
   Skyfan DC ceiling fans, over Tuya's local LAN protocol.
+- **[hunterpacific-driver](hunterpacific-driver/)** (`hunterpacific-tuya-lan`) —
+  Hunter Pacific DC ceiling fans (e.g. Aqua DC), over Tuya's local LAN
+  protocol.
 - **[se-modbus-driver](se-modbus-driver/)** (`se-modbus-tcp`) —
   SolarEdge inverter, over local Modbus TCP (SunSpec).
 - **[bigassfans-driver](bigassfans-driver/)** (`bigassfans-i6-lan`) —

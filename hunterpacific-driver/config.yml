@@ -1,0 +1,7 @@
+name: hunterpacific-tuya-lan
+packageKey: hunterpacific-tuya-lan
+author: BenM
+description: Hunter Pacific DC ceiling fan via local Tuya LAN protocol
+permissions:
+  lan: {}
+  discovery: {}
