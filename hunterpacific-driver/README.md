@@ -2,6 +2,8 @@
 
 SmartThings Edge driver for Hunter Pacific DC ceiling fans with a Tuya WiFi module (tested on the Aqua DC). Controls the fan over Tuya's local LAN protocol (TCP 6668); no cloud.
 
+Community thread: https://community.smartthings.com/t/st-edge-lan-driver-hunter-pacific-dc-ceiling-fans-tuya-wifi-local-control/311396
+
 ## Features
 
 - Fan: on/off, speed (Off + 1–9), direction.
