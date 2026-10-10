@@ -522,7 +522,7 @@ local ACTIVE_PROFILE_FIELD = "active_profile"
 -- from the packaged profiles; a renamed profile gets a new UUID. While a
 -- UUID is unknown (nil), the persisted field is used instead.
 local PROFILE_TO_ID = {
-  [WITH_ADDFAN_PROFILE] = nil,
+  [WITH_ADDFAN_PROFILE] = "e2bd826d-1f6d-3630-a720-4d8209bb8fca",
   [NO_ADDFAN_PROFILE] = "5a0a1fc1-3ea4-38c9-b58a-2be9f274eb46",
 }
 
