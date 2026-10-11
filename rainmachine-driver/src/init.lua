@@ -83,9 +83,14 @@ local function children_of(driver, parent)
   return found
 end
 
+--- The field is nil until the first status update after creation or a
+--- driver restart. A new child is marked online explicitly then: left to
+--- the platform, a new zone could show offline for minutes (seen on an
+--- HD-12, 2026-10-11).
 local function set_child_online(child, online, reason)
-  local offline = child:get_field(CHILD_OFFLINE_FIELD) == true
-  if online and offline then
+  local state = child:get_field(CHILD_OFFLINE_FIELD)
+  local offline = state == true
+  if online and (offline or state == nil) then
     child:online()
     child:set_field(CHILD_OFFLINE_FIELD, false)
   elseif not online and not offline then
