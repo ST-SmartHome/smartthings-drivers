@@ -2,6 +2,8 @@
 
 SmartThings Edge driver for RainMachine irrigation controllers (Mini-8, Touch HD-12/16, Pro-8/16). It uses the controller's local HTTP API, with no cloud. The controller is found by mDNS, so the only setting you have to enter is its password.
 
+Community thread: https://community.smartthings.com/t/title-st-edge-rainmachine-lan-driver-local-control-no-cloud-or-subscription-rainmachine-lan/311412
+
 ## Devices
 
 - **RainMachine** (controller):
