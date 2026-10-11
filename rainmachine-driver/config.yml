@@ -1,0 +1,7 @@
+name: rainmachine-lan
+packageKey: rainmachine-lan
+author: BenM
+description: RainMachine irrigation controller via its local HTTP API
+permissions:
+  lan: {}
+  discovery: {}

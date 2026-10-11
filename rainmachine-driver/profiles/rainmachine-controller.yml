@@ -1,0 +1,60 @@
+name: rainmachine-controller.v5
+components:
+  - id: main
+    label: "RainMachine"
+    capabilities:
+      - id: aboutisland47519.irrigationStatus
+        version: 1
+      - id: aboutisland47519.nextWatering
+        version: 1
+      - id: aboutisland47519.weatherForecast
+        version: 1
+      - id: aboutisland47519.weatherToday
+        version: 1
+      - id: aboutisland47519.rainDelay
+        version: 1
+      - id: aboutisland47519.stopAllWatering
+        version: 1
+      - id: refresh
+        version: 1
+    categories:
+      - name: Irrigation
+preferences:
+  - title: "IP Address (optional)"
+    name: ipAddress
+    description: "Leave as 0.0.0.0 to find the RainMachine automatically. Enter its IP only if it isn't found (e.g. it's on another network segment)"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      minLength: 7
+      maxLength: 15
+      default: "0.0.0.0"
+  - title: "HTTP Port"
+    name: port
+    description: "RainMachine's local plain-HTTP API port. 8081 unless you've changed it (HTTPS on 8080 isn't used)"
+    required: true
+    preferenceType: integer
+    definition:
+      minimum: 1
+      maximum: 65535
+      default: 8081
+  - title: "Password"
+    name: password
+    description: "The password you use to log in to the RainMachine app or web page"
+    required: true
+    preferenceType: string
+    definition:
+      stringType: password
+      minLength: 1
+      maxLength: 64
+      default: "change-me"
+  - title: "Poll Interval (seconds)"
+    name: pollInterval
+    description: "How often to read status while nothing is watering. While watering it's every 10 seconds"
+    required: true
+    preferenceType: integer
+    definition:
+      minimum: 10
+      maximum: 3600
+      default: 30

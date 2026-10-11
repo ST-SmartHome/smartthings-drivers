@@ -1,0 +1,22 @@
+{
+ "name": "Irrigation Status",
+ "attributes": {
+  "status": {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "value": {
+      "type": "string",
+      "maxLength": 60
+     }
+    },
+    "additionalProperties": false,
+    "required": [
+     "value"
+    ]
+   },
+   "enumCommands": []
+  }
+ },
+ "commands": {}
+}

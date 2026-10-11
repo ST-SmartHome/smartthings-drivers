@@ -1,0 +1,24 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{nextWatering.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Next Watering",
+   "displayType": "state",
+   "state": {
+    "label": "{{nextWatering.value}}"
+   }
+  }
+ ],
+ "automation": {
+  "conditions": [],
+  "actions": []
+ }
+}

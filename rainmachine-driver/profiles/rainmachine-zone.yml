@@ -1,0 +1,15 @@
+name: rainmachine-zone.v1
+components:
+  - id: main
+    label: "Zone"
+    capabilities:
+      - id: switch
+        version: 1
+      - id: aboutisland47519.wateringTime
+        version: 1
+      - id: aboutisland47519.timeRemaining
+        version: 1
+      - id: refresh
+        version: 1
+    categories:
+      - name: Irrigation

@@ -1,0 +1,10 @@
+{
+ "name": "Stop All Watering",
+ "attributes": {},
+ "commands": {
+  "push": {
+   "name": "push",
+   "arguments": []
+  }
+ }
+}

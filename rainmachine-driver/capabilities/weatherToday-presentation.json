@@ -1,0 +1,24 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{weather.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Weather Today",
+   "displayType": "state",
+   "state": {
+    "label": "{{weather.value}}"
+   }
+  }
+ ],
+ "automation": {
+  "conditions": [],
+  "actions": []
+ }
+}

@@ -1,0 +1,24 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{forecast.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Forecast",
+   "displayType": "state",
+   "state": {
+    "label": "{{forecast.value}}"
+   }
+  }
+ ],
+ "automation": {
+  "conditions": [],
+  "actions": []
+ }
+}

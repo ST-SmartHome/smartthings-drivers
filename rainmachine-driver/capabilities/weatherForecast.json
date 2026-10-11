@@ -1,0 +1,22 @@
+{
+ "name": "Weather Forecast",
+ "attributes": {
+  "forecast": {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "value": {
+      "type": "string",
+      "maxLength": 120
+     }
+    },
+    "additionalProperties": false,
+    "required": [
+     "value"
+    ]
+   },
+   "enumCommands": []
+  }
+ },
+ "commands": {}
+}

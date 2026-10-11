@@ -1,0 +1,33 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{nextRun.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Next Run",
+   "displayType": "state",
+   "state": {
+    "label": "{{nextRun.value}}"
+   }
+  }
+ ],
+ "automation": {
+  "conditions": [
+   {
+    "label": "Next Run",
+    "displayType": "textField",
+    "textField": {
+     "value": "nextRun.value",
+     "valueType": "string"
+    }
+   }
+  ],
+  "actions": []
+ }
+}

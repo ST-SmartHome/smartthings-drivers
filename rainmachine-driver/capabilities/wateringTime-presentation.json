@@ -1,0 +1,65 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{wateringTime.value}} {{wateringTime.unit}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "automation": {
+  "conditions": [
+   {
+    "label": "Watering Time",
+    "displayType": "numberField",
+    "numberField": {
+     "value": "wateringTime.value",
+     "valueType": "integer",
+     "unit": "wateringTime.unit",
+     "range": [
+      1,
+      120
+     ]
+    }
+   }
+  ],
+  "actions": [
+   {
+    "label": "Watering Time",
+    "displayType": "slider",
+    "slider": {
+     "range": [
+      1,
+      120
+     ],
+     "step": 1,
+     "unit": "wateringTime.unit",
+     "command": "setWateringTime",
+     "argumentType": "integer"
+    }
+   }
+  ]
+ },
+ "detailView": [
+  {
+   "label": "Watering Time",
+   "displayType": "slider",
+   "slider": {
+    "range": [
+     1,
+     120
+    ],
+    "step": 1,
+    "unit": "wateringTime.unit",
+    "command": "setWateringTime",
+    "argumentType": "integer",
+    "value": "wateringTime.value",
+    "valueType": "integer"
+   },
+   "state": {
+    "label": "{{wateringTime.value}} {{wateringTime.unit}}"
+   }
+  }
+ ]
+}

@@ -11,6 +11,9 @@ cloud dependency once set up.
   protocol.
 - **[se-modbus-driver](se-modbus-driver/)** (`se-modbus-tcp`) —
   SolarEdge inverter, over local Modbus TCP (SunSpec).
+- **[rainmachine-driver](rainmachine-driver/)** (`rainmachine-lan`) —
+  RainMachine irrigation controllers (Mini-8, Touch HD, Pro), over their
+  local HTTP API, mDNS auto-discovered.
 - **[bigassfans-driver](bigassfans-driver/)** (`bigassfans-i6-lan`) —
   Big Ass Fans Haiku H/I Series ceiling fans, over their local "i6"
   protocol, mDNS auto-discovered.

@@ -1,0 +1,65 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{rainDelay.value}} {{rainDelay.unit}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "automation": {
+  "conditions": [
+   {
+    "label": "Rain Delay",
+    "displayType": "numberField",
+    "numberField": {
+     "value": "rainDelay.value",
+     "valueType": "integer",
+     "unit": "rainDelay.unit",
+     "range": [
+      0,
+      14
+     ]
+    }
+   }
+  ],
+  "actions": [
+   {
+    "label": "Rain Delay",
+    "displayType": "slider",
+    "slider": {
+     "range": [
+      0,
+      14
+     ],
+     "step": 1,
+     "unit": "rainDelay.unit",
+     "command": "setRainDelay",
+     "argumentType": "integer"
+    }
+   }
+  ]
+ },
+ "detailView": [
+  {
+   "label": "Rain Delay",
+   "displayType": "slider",
+   "slider": {
+    "range": [
+     0,
+     14
+    ],
+    "step": 1,
+    "unit": "rainDelay.unit",
+    "command": "setRainDelay",
+    "argumentType": "integer",
+    "value": "rainDelay.value",
+    "valueType": "integer"
+   },
+   "state": {
+    "label": "{{rainDelay.value}} {{rainDelay.unit}}"
+   }
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "name": "Next Watering",
+ "attributes": {
+  "nextWatering": {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "value": {
+      "type": "string",
+      "maxLength": 40
+     }
+    },
+    "additionalProperties": false,
+    "required": [
+     "value"
+    ]
+   },
+   "enumCommands": []
+  }
+ },
+ "commands": {}
+}

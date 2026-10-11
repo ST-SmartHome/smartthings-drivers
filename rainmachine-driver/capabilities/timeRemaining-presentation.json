@@ -1,0 +1,38 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{timeRemaining.value}} {{timeRemaining.unit}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "automation": {
+  "conditions": [
+   {
+    "label": "Time Remaining",
+    "displayType": "numberField",
+    "numberField": {
+     "value": "timeRemaining.value",
+     "valueType": "integer",
+     "unit": "timeRemaining.unit",
+     "range": [
+      0,
+      1440
+     ]
+    }
+   }
+  ],
+  "actions": []
+ },
+ "detailView": [
+  {
+   "label": "Time Remaining",
+   "displayType": "state",
+   "state": {
+    "label": "{{timeRemaining.value}} {{timeRemaining.unit}}"
+   }
+  }
+ ]
+}
