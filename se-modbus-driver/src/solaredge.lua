@@ -175,7 +175,10 @@ local function read_battery(client)
     return nil
   end
   local rated = float32_le(regs, BATT_IDX.RATED_ENERGY)
-  if not rated or rated <= 0 then
+  -- A real battery's rated energy is roughly 1-200 kWh. Anything else is
+  -- "no battery" or a garbled read (one after a driver update once put a
+  -- battery-less inverter on the battery profile, 2026-10-10).
+  if not rated or rated < 1000 or rated > 200000 then
     return nil
   end
   local status = uint32_le(regs, BATT_IDX.STATUS)

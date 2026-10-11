@@ -9,9 +9,14 @@ local POLL_TIMER_FIELD = "poll_timer"
 local POLL_IN_PROGRESS_FIELD = "poll_in_progress"
 local HAS_BATTERY_FIELD = "has_battery"
 local THREE_PHASE_FIELD = "three_phase"
+local BATTERY_SEEN_FIELD = "battery_seen_polls"
+local BATTERY_MISSING_FIELD = "battery_missing_polls"
+local BATTERY_CONFIRM_POLLS = 3
+local BATTERY_GONE_POLLS = 60
 -- Profile per detected hardware. Non-battery single-phase installs stay
--- on CURRENT_PROFILE. Both detections are persisted and only
--- ever switch ON, once, so profiles never oscillate.
+-- on CURRENT_PROFILE. Three-phase is persisted and only ever switches ON.
+-- The battery needs 3 polls in a row to switch on and 60 polls in a row
+-- without one to switch off again, so it can't oscillate.
 local CURRENT_PROFILE = "solaredge-inverter.v8"
 local BATTERY_PROFILE = "solaredge-inverter-battery.v4"
 local THREE_PHASE_PROFILE = "solaredge-inverter-3ph.v4"
@@ -166,16 +171,26 @@ local function poll_once(driver, device)
     end
 
     -- Battery (StorEdge / hybrid) is optional hardware, read-only. The
-    -- first time one is detected, remember it and move the device to the
-    -- battery profile once (guarded by the persisted field, so this never
-    -- repeats or oscillates; installs without a battery never switch).
+    -- battery section (and the header battery icon) appears only after a
+    -- battery has been read on BATTERY_CONFIRM_POLLS polls in a row, and
+    -- is removed again after BATTERY_GONE_POLLS polls in a row without
+    -- one. A single garbled read after a driver update once added it to a
+    -- battery-less inverter for good (2026-10-10).
     local batt = reading.battery
     if batt then
+      device:set_field(BATTERY_MISSING_FIELD, 0)
       if not device:get_field(HAS_BATTERY_FIELD) then
-        device:set_field(HAS_BATTERY_FIELD, true, { persist = true })
-        log.info(string.format("SolarEdge: battery detected (rated %.0f Wh), switching to profile %s",
-          batt.rated_energy_wh, target_profile(device)))
-        device:try_update_metadata({ profile = target_profile(device) })
+        local seen = (device:get_field(BATTERY_SEEN_FIELD) or 0) + 1
+        device:set_field(BATTERY_SEEN_FIELD, seen)
+        if seen >= BATTERY_CONFIRM_POLLS then
+          device:set_field(HAS_BATTERY_FIELD, true, { persist = true })
+          log.info(string.format("SolarEdge: battery confirmed (rated %.0f Wh, %d polls), switching to profile %s",
+            batt.rated_energy_wh, seen, target_profile(device)))
+          device:try_update_metadata({ profile = target_profile(device) })
+        else
+          log.info(string.format("SolarEdge: battery read (rated %.0f Wh), confirming %d/%d",
+            batt.rated_energy_wh, seen, BATTERY_CONFIRM_POLLS))
+        end
       end
       log.info(string.format("SolarEdge battery: %s%%, %sW, %sV, %s, status=%s",
         tostring(batt.soe_pct), tostring(batt.power_w), tostring(batt.voltage_v),
@@ -212,6 +227,19 @@ local function poll_once(driver, device)
         if batt.energy_available_wh and batt.energy_available_wh >= 0 then
           local kwh = round(batt.energy_available_wh / 1000, 1)
           device:emit_component_event(bc, BATTERY_STORAGE_CAP.energyAvailable({ value = kwh, unit = "kWh" }))
+        end
+      end
+    else
+      device:set_field(BATTERY_SEEN_FIELD, 0)
+      if device:get_field(HAS_BATTERY_FIELD) then
+        local missing = (device:get_field(BATTERY_MISSING_FIELD) or 0) + 1
+        device:set_field(BATTERY_MISSING_FIELD, missing)
+        if missing >= BATTERY_GONE_POLLS then
+          device:set_field(HAS_BATTERY_FIELD, nil, { persist = true })
+          device:set_field(BATTERY_MISSING_FIELD, 0)
+          log.info(string.format("SolarEdge: no battery for %d polls, removing the battery section (profile %s)",
+            missing, target_profile(device)))
+          device:try_update_metadata({ profile = target_profile(device) })
         end
       end
     end

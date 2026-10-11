@@ -21,7 +21,7 @@ Community thread: https://community.smartthings.com/t/st-edge-driver-solaredge-p
 
 Grid power already accounts for household use, so use it, not inverter output, for "solar surplus" Routines. Installs without a meter just don't show the Grid section.
 
-The driver detects a three-phase meter (real voltage on L2 and L3) and a battery on its own, and switches the device's layout once when it finds them. Single-phase sites show one phase row. Phase current is measured by the meter and shown without a sign; the power sign gives the direction.
+The driver detects a three-phase meter (real voltage on L2 and L3) and a battery on its own, and switches the device's layout when it finds them. A battery must be read on 3 polls in a row before the Battery section and header battery icon appear, and they're removed again after 60 polls in a row (about 30 minutes) without one. Single-phase sites show one phase row. Phase current is measured by the meter and shown without a sign; the power sign gives the direction.
 
 On hybrid inverters with a battery, the DC voltage is the inverter's shared DC bus, not the panel or battery voltage.
 
