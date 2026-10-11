@@ -55,6 +55,6 @@ Module: Tuya "9 Speed WiFi Remote" (product `agjbamgmrbcbazp7`, category `fsd`).
 - `src/tuya_client.lua`: one TCP connection per request; picks 3.3 or 3.5 per fan.
 - `src/init.lua`: device handlers, polling, connection health, light child devices.
 - `src/discovery.lua`: creates the first device; later fans come from the button.
-- `src/lockbox`: bundled pure-Lua crypto for 3.3 (the platform has none).
+- `src/lockbox`: bundled pure-Lua crypto for 3.3 (the platform has none): [lua-lockbox](https://github.com/somesocks/lua-lockbox), MIT, © 2015 James L. Its licence is in `src/lockbox/LICENSE`.
 
 Shares its Tuya transport with [skyfan-driver](../skyfan-driver/).

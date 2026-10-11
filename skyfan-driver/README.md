@@ -53,4 +53,4 @@ A fan shows **offline** if its local key or device ID is wrong (it answers but i
 - `src/tuya_client.lua`: one TCP connection per request; picks 3.3 or 3.5 per fan.
 - `src/init.lua`: device handlers, polling, light child devices.
 - `src/discovery.lua`: creates the first device; later fans come from the button.
-- `src/lockbox`: bundled pure-Lua crypto for 3.3 (the platform has none).
+- `src/lockbox`: bundled pure-Lua crypto for 3.3 (the platform has none): [lua-lockbox](https://github.com/somesocks/lua-lockbox), MIT, © 2015 James L. Its licence is in `src/lockbox/LICENSE`.
