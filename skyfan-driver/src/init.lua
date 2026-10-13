@@ -130,8 +130,19 @@ end
 --- no-ops. Reused for both the parent (called from poll_once with its
 --- own light component) and a light child (called from poll_once with
 --- the same fresh dps).
+-- Set on a light child once online() has been sent this driver run.
+local LIGHT_ONLINE_FIELD = "light_marked_online"
+
 local function apply_light_status(device, dps)
   if is_light_child(device) then
+    -- Fresh light data means the light device is reachable: say so
+    -- explicitly. Only the fan used to call online(), so after a platform
+    -- health re-check (2026-10-11) every light child sat OFFLINE while
+    -- still updating. Repeated after each driver start (non-persisted field).
+    if device:get_field(LIGHT_ONLINE_FIELD) ~= true then
+      device:online()
+      device:set_field(LIGHT_ONLINE_FIELD, true)
+    end
     if dps["15"] ~= nil then
       device:emit_event(capabilities.switch.switch(dps["15"] and "on" or "off"))
     end
