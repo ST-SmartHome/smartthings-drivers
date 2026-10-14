@@ -49,7 +49,9 @@ The master valve never gets a device. RainMachine opens it automatically wheneve
 
 - Schedules, zone durations and restrictions are set in the RainMachine app. The driver shows them and controls watering, but doesn't edit programs.
 - **Stop All** stops what's running and clears the queue. It doesn't cancel future schedules; use Rain Delay for that.
-- The SmartThings app may not refresh text tiles on an open page. Pull down to refresh.
+- The SmartThings app may show the values from your last visit when you open the page, and update them slowly. Pull down to refresh.
+- **Tested** on a Pro-8; an HD-12 has been confirmed by a community user. Reports from Mini-8, HD-16, Pro-16 and 1st-generation Touch owners are welcome.
+- **One controller per hub** for now.
 
 ## Source
 

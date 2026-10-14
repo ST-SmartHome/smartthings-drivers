@@ -39,7 +39,7 @@ Module: Tuya "9 Speed WiFi Remote" (product `agjbamgmrbcbazp7`, category `fsd`).
 
 ## Behaviour notes
 
-- The module reports the light data points whether or not a light kit is fitted, so the light can't be detected automatically.
+- The module reports the light data points whether or not a light kit is fitted, so the light can't be detected automatically. Hunter Pacific has confirmed there are no plans to change this, so **Light Kit Fitted** is the permanent way to enable the light.
 - The fan slows, stops and reverses by itself, so the driver doesn't stop it first. It ignores a second direction change for about 30 s while reversing; the driver keeps retrying for up to 45 s.
 - Colour temperature (DP 23) is in Tuya's cloud spec but not reported locally, so it isn't supported.
 
