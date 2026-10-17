@@ -53,7 +53,10 @@ baf.FIELDS = {
   name             = { no = 1,  kind = "string", category = "ALL" },
   model            = { no = 2,  kind = "string", category = "ALL" },
   firmware_version = { no = 7,  kind = "string", category = "ALL" },
-  mac_address      = { no = 8,  kind = "string", category = "ALL" },
+  -- category FIRMWARE_MORE_DATETIME_API, not ALL (2026-10-17): the fan returns
+  -- field 8 in both, and the driver queries FIRMWARE_MORE_DATETIME_API to
+  -- show the MAC address in Device Settings.
+  mac_address      = { no = 8,  kind = "string", category = "FIRMWARE_MORE_DATETIME_API" },
   -- uuid9/dns_sd_uuid: present in the public jfroy/aiobafi6 reference
   -- schema but never previously modeled here. dns_sd_uuid is the same
   -- uuid discovery_mdns.lua already reads from the fan's mDNS TXT record
@@ -336,6 +339,25 @@ function baf.decode_unoccupied_behavior(raw)
   local mode = pb.last(fields, 1)
   local speed = pb.last(fields, 2)
   return { mode = mode or 0, speed = speed or 0 }
+end
+
+--- network_wifi_info (field 124) is a nested submessage: sub-field 1 = the
+--- connected SSID, sub-field 2 = the Wi-Fi signal in dBm (a negative varint).
+--- Confirmed 2026-10-17 against the BAF app's own Wi-Fi signal screen (within a
+--- few dB). Returns ssid, rssi; either may be nil.
+function baf.decode_wifi_info(raw)
+  if type(raw) ~= "string" or raw == "" then
+    return nil, nil
+  end
+  local ok, fields = pcall(pb.parse_fields, raw)
+  if not ok then
+    return nil, nil
+  end
+  local ssid = pb.last(fields, 1)
+  local rssi = pb.last(fields, 2)
+  if type(ssid) ~= "string" then ssid = nil end
+  if type(rssi) ~= "number" or rssi < -120 or rssi > 0 then rssi = nil end
+  return ssid, rssi
 end
 
 function baf.encode_unoccupied_behavior(mode, speed)

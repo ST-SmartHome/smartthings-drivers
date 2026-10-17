@@ -9,7 +9,7 @@ Fields of the proto2 `Properties` message: from `aiobafi6.proto`, plus some foun
 | 1 | `name` | string | ALL | Fan's configured name |
 | 2 | `model` | string | ALL | Hardware model string (e.g. "Haiku H/I Series") |
 | 7 | `firmware_version` | string | ALL | e.g. "3.3.7" |
-| 8 | `mac_address` | string | ALL | Fan's MAC address |
+| 8 | `mac_address` | string | ALL | Fan's MAC address. Also returned for FIRMWARE_MORE_DATETIME_API, which is where the driver reads it |
 | 9 | `uuid9` | string | ALL | A device UUID; how it differs from `dns_sd_uuid` is undocumented |
 | 10 | `dns_sd_uuid` | string | ALL | Same UUID as the mDNS TXT record. The driver reads it from mDNS, not this field |
 | 13 | `api_version` | string | ALL | e.g. "8" |
@@ -54,7 +54,7 @@ Fields of the proto2 `Properties` message: from `aiobafi6.proto`, plus some foun
 | 112 | `sleep_timer_duration` | int (seconds) | FAN | Sleep Timer duration |
 | 117 | `sleep_light_auto_motion_timeout_secs` | int (seconds) | LIGHT | Sleep preset's light Auto motion timeout (main light: 73, Wake Up: 128) |
 | 120 | `network_ip` | string | NETWORK | Fan's LAN IP |
-| 124 | `network_wifi_info` | nested | NETWORK | Sub-field 1: Wi-Fi SSID, in plaintext, readable by anyone on the LAN. Sub-field 2 (not upstream): probably RSSI (dBm) |
+| 124 | `network_wifi_info` | nested | NETWORK | Sub-field 1: Wi-Fi SSID, in plaintext, readable by anyone on the LAN. Sub-field 2 (not upstream): Wi-Fi signal (RSSI) in dBm, as a negative varint. Confirmed against the signal shown in the BAF app (3.4.0+) |
 | 128 | `wake_up_motion_timeout_secs` | int (seconds) | LIGHT | Wake Up preset's post-motion timeout |
 | 129 | `sleep_return_to_auto` | bool | FAN | Auto screen's "Return to Auto" toggle |
 | 130 | `sleep_return_to_auto_secs` | int (seconds) | FAN | Duration for the above |

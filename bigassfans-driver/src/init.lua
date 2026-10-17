@@ -391,6 +391,57 @@ local function apply_sensor_status(device, sensors)
       value = sensors.temperature_raw / 100.0, unit = "C" }))
 end
 
+--- Network info for Device Settings (2026-10-17): Wi-Fi network + signal,
+--- IP address, MAC address. Read-only. NETWORK and FIRMWARE_MORE_DATETIME_API
+--- are only queried every NetInfo.POLL_INTERVAL seconds (see poll_once), so
+--- these update far less often than the fan state. The displayed signal only
+--- moves on a change of 3 dB or more (or a new quality band), so normal
+--- 1-2 dB jitter doesn't fill the device history.
+-- One table rather than separate locals: init.lua's main chunk is at Lua's
+-- 200-local limit.
+local NetInfo = {
+  POLL_INTERVAL = 600,
+  WIFI_SIGNAL_CAP = capabilities["aboutisland47519.wifiSignal"],
+  IP_ADDRESS_CAP = capabilities["aboutisland47519.ipAddress"],
+  MAC_ADDRESS_CAP = capabilities["aboutisland47519.macAddress"],
+}
+
+function NetInfo.wifi_quality(rssi)
+  if rssi >= -55 then return "Excellent"
+  elseif rssi >= -65 then return "Good"
+  elseif rssi >= -75 then return "Fair"
+  end
+  return "Weak"
+end
+
+function NetInfo.apply(device, network, identity)
+  local settings = device.profile.components.settings
+  if not settings then
+    return
+  end
+  if network then
+    local ssid, rssi = baf.decode_wifi_info(network.network_wifi_info)
+    if rssi then
+      local shown = device:get_field("wifi_rssi_shown")
+      if not shown or math.abs(rssi - shown) >= 3 or NetInfo.wifi_quality(rssi) ~= NetInfo.wifi_quality(shown) then
+        shown = rssi
+        device:set_field("wifi_rssi_shown", rssi)
+      end
+      local text = string.format("%s (%d dBm)", NetInfo.wifi_quality(shown), shown)
+      if ssid and ssid ~= "" then
+        text = ssid .. ", " .. text
+      end
+      device:emit_component_event(settings, NetInfo.WIFI_SIGNAL_CAP.wifiSignal({ value = text }))
+    end
+    if type(network.network_ip) == "string" and network.network_ip ~= "" then
+      device:emit_component_event(settings, NetInfo.IP_ADDRESS_CAP.ipAddress({ value = network.network_ip }))
+    end
+  end
+  if identity and type(identity.mac_address) == "string" and identity.mac_address ~= "" then
+    device:emit_component_event(settings, NetInfo.MAC_ADDRESS_CAP.macAddress({ value = identity.mac_address:upper() }))
+  end
+end
+
 --- Sleep/Wake Up sub-settings (2026-08-27). Unlike sensors/LED/Beep/IR,
 --- these fields are directly queryable (FAN and LIGHT categories), so
 --- they arrive on every normal poll_once call already -- no extra query
@@ -671,10 +722,18 @@ local function poll_once(driver, device)
     -- rate from ~20% to ~4% (0.2 * 0.2). Not tested against a controlled
     -- packet-loss rig, just live poll cycles — revisit if misses persist
     -- after this.
-    local results, err = BafClient.query_multi(ip, { "FAN", "LIGHT", "SENSORS" }, 5)
+    -- NETWORK + FIRMWARE_MORE_DATETIME_API (Wi-Fi/IP/MAC for Device Settings,
+    -- 2026-10-17) only every NetInfo.POLL_INTERVAL seconds, on the same
+    -- connection as the normal poll.
+    local categories = { "FAN", "LIGHT", "SENSORS" }
+    local network_due = os.time() - (device:get_field("network_polled_at") or 0) >= NetInfo.POLL_INTERVAL
+    if network_due then
+      categories = { "FAN", "LIGHT", "SENSORS", "NETWORK", "FIRMWARE_MORE_DATETIME_API" }
+    end
+    local results, err = BafClient.query_multi(ip, categories, 5)
     if not results then
       log.warn("BAF poll query failed for " .. ip .. " (retrying once): " .. tostring(err))
-      results, err = BafClient.query_multi(ip, { "FAN", "LIGHT", "SENSORS" }, 5)
+      results, err = BafClient.query_multi(ip, categories, 5)
     end
     if not results then
       log.error("BAF poll query failed for " .. ip .. " after retry: " .. tostring(err))
@@ -687,6 +746,14 @@ local function poll_once(driver, device)
     end
     apply_sleep_status(device, results.FAN, results.LIGHT)
     apply_comfort_cluster_status(device, results.FAN)
+    if network_due and (results.NETWORK or results.FIRMWARE_MORE_DATETIME_API) then
+      local ok_net, net_err = pcall(NetInfo.apply, device, results.NETWORK, results.FIRMWARE_MORE_DATETIME_API)
+      if ok_net then
+        device:set_field("network_polled_at", os.time())
+      else
+        log.warn("BAF network info update failed for " .. ip .. ": " .. tostring(net_err))
+      end
+    end
 
     -- If a light-child has been created for this fan, push the same
     -- fresh LIGHT data to it too — one poll, two devices updated, still
@@ -964,10 +1031,10 @@ end
 -- places that must move together, the YAML's `name:` and the constant
 -- here (plus discovery.lua's PROFILE) -- a mismatch silently requests a
 -- profile that doesn't exist in the package.
-local WITH_ADDFAN_PROFILE = "bigassfans-h.v8"
-local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v8"
-local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v10"
-local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v46"
+local WITH_ADDFAN_PROFILE = "bigassfans-h.v9"
+local NO_ADDFAN_PROFILE = "bigassfans-h-no-addfan.v9"
+local NO_LIGHT_PROFILE = "bigassfans-h-no-light.v12"
+local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v48"
 
 -- Real deviceIntegrationProfile UUIDs, confirmed via live device reads
 -- (2026-10-09). A renamed profile gets a new UUID, so re-confirm after
@@ -975,8 +1042,8 @@ local NO_LIGHT_NO_ADDFAN_PROFILE = "bigassfans-h-no-light-no-addfan.v46"
 -- switch.
 local WITH_ADDFAN_PROFILE_ID = "fe5ba2a3-e3ac-34c6-8342-c21de42c82ad"
 local NO_ADDFAN_PROFILE_ID = nil
-local NO_LIGHT_PROFILE_ID = "4cc8d7ee-2f92-3b82-bb9e-9dfeb51493fb"
-local NO_LIGHT_NO_ADDFAN_PROFILE_ID = "a9accf8f-1204-3d25-9b0a-0dd997ca9b46"
+local NO_LIGHT_PROFILE_ID = nil -- v12 id unknown (no device rests on it); nil just means a redundant switch request at init
+local NO_LIGHT_NO_ADDFAN_PROFILE_ID = "cdb731b3-70c8-3569-87bb-a3c249a2727d" -- v48 (10-17), read from a live device after the switch
 
 local PROFILE_TO_ID = {
   [WITH_ADDFAN_PROFILE] = WITH_ADDFAN_PROFILE_ID,

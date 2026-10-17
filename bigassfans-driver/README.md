@@ -14,7 +14,7 @@ Community thread: https://community.smartthings.com/t/st-edge-driver-big-a-fans-
   - Heat Assist;
   - Motion (timeout, unoccupied behaviour);
   - Return to Auto;
-  - Settings (LED indicators, beep, IR remote, temperature);
+  - Settings (LED indicators, beep, IR remote, temperature, and the fan's Wi-Fi network and signal strength, IP address and MAC address);
   - Schedules (enable/disable up to 5 named on-fan schedules).
 - Temperature from the fan's built-in sensor.
 - Direction changes stop the fan first.

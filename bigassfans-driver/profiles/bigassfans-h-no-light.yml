@@ -1,7 +1,7 @@
-name: bigassfans-h-no-light.v10
+name: bigassfans-h-no-light.v12
 metadata:
   mnmn: SmartThingsCommunity
-  vid: 14ad7524-a9f9-3ab6-95f9-dd97861877b9
+  vid: b3d6babb-769b-3e80-a861-03f961314adc
 components:
   - id: main
     label: "Fan+Light"
@@ -119,6 +119,12 @@ components:
       - id: aboutisland47519.legacyIrRemote
         version: 1
       - id: temperatureMeasurement
+        version: 1
+      - id: aboutisland47519.wifiSignal
+        version: 1
+      - id: aboutisland47519.ipAddress
+        version: 1
+      - id: aboutisland47519.macAddress
         version: 1
   - id: schedule
     label: "Schedule"
