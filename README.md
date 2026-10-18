@@ -26,6 +26,12 @@ Each has its own `README.md` (technical details, setup).
   — Mercator Ikuü SPP02GIP double power point (Tuya `TS011F`): outlet 2
   as its own device (for Alexa/Google), correct energy readings,
   adjustable reporting, and a per-outlet Auto Off Timer that runs on the
-  plug itself. It lives in a separate repository because it's a fork of
-  [wonjj6768's Zigbee Edge drivers](https://github.com/wonjj6768/smartthings-zigbee-edge-drivers),
-  which keeps it in sync with upstream and lets fixes go back upstream.
+  plug itself.
+- **[EF00 Sensors ST-SmartHome](https://github.com/ST-SmartHome/smartthings-zigbee-edge-drivers/tree/main/deploy/ef00-sensors-st-smarthome)**
+  — 7-in-1 pool water quality meter (Tuya `TS0601` / `_TZE200_v1jqz5cy`):
+  pH and free chlorine limits shown and set as decimals (7.8 pH, 2.4 mg/L),
+  negative ORP limits, and readable labels.
+
+Both live in a separate repository because they're forks of
+[wonjj6768's Zigbee Edge drivers](https://github.com/wonjj6768/smartthings-zigbee-edge-drivers),
+which keeps them in sync with upstream and lets fixes go back upstream.
