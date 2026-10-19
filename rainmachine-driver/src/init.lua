@@ -2,7 +2,7 @@
 ---
 --- Devices:
 ---   controller (one per RainMachine): irrigation status, rain delay,
----     "Stop all watering", and the IP/password settings;
+---     Pause Watering, "Stop all watering", and the IP/password settings;
 ---   one child device per active zone: switch (on = water for the zone's
 ---     Watering Time), Watering Time, Time Remaining, Last watered, Next
 ---     watering, Last 7 days, and the zone's setup from the RainMachine app
@@ -28,6 +28,7 @@ local display = require "display"
 local STATUS_CAP = capabilities["aboutisland47519.irrigationStatus"]
 local RAIN_DELAY_CAP = capabilities["aboutisland47519.rainDelay"]
 local STOP_ALL_CAP = capabilities["aboutisland47519.stopAllWatering"]
+local PAUSE_CAP = capabilities["aboutisland47519.pauseWatering"]
 local WATERING_TIME_CAP = capabilities["aboutisland47519.wateringTime"]
 local TIME_REMAINING_CAP = capabilities["aboutisland47519.timeRemaining"]
 local NEXT_RUN_CAP = capabilities["aboutisland47519.nextRun"]
@@ -46,7 +47,7 @@ local SPRINKLER_CAP = capabilities["aboutisland47519.sprinklerHeads"]
 local SLOPE_CAP = capabilities["aboutisland47519.slope"]
 local EXPOSURE_CAP = capabilities["aboutisland47519.exposure"]
 
-local CONTROLLER_PROFILE = "rainmachine-controller.v5"
+local CONTROLLER_PROFILE = "rainmachine-controller.v6"
 local ZONE_PROFILE = "rainmachine-zone.v3"
 local PROGRAM_MAX_SLOTS = 16
 
@@ -63,6 +64,9 @@ local CHILD_CREATE_RETRY_SECONDS = 120
 local FORECAST_REFRESH_SECONDS = 15 * 60
 local FORECAST_LAST_FIELD = "forecast_last"
 local STOPPED_AT_FIELD = "stopped_at"
+-- {value = "15"/"30"/"60"/"120", ends_at = os.time()} while paused (persisted):
+-- RainMachine has no call that reports a pause, so the driver keeps it.
+local PAUSE_FIELD = "pause"
 local STOPPED_SHOW_SECONDS = 30 * 60
 local PCT_BY_DAY_FIELD = "watering_pct_by_day"
 local DETAILS_FIELD = "program_day_details"
@@ -962,6 +966,44 @@ local function apply_status(driver, device, zones, programs, restrictions, s, qu
   elseif not ok then
     log.warn("RainMachine program status failed: " .. tostring(program_line))
   end
+  -- A pause shows in RainMachine's queue as a running entry with no real
+  -- zone (zid 1005 seen 2026-10-19) whose remaining seconds count down;
+  -- paused zones wait behind it. That catches a pause started in the
+  -- RainMachine app too, and RainMachine's own time left wins.
+  local pause = device:get_field(PAUSE_FIELD)
+  local marker
+  for _, e in ipairs(ctx.queue) do
+    if e.running and tonumber(e.zid) and e.zid >= 1000 then
+      marker = e
+    end
+  end
+  if marker then
+    local secs = tonumber(marker.remaining) or 0
+    local value = pause and pause.value
+    if not value then
+      value = "120"
+      for _, option in ipairs({ "15", "30", "60", "120" }) do
+        if secs <= tonumber(option) * 60 then
+          value = option
+          break
+        end
+      end
+    end
+    pause = { value = value, ends_at = os.time() + secs, set_at = pause and pause.set_at or 0 }
+    device:set_field(PAUSE_FIELD, pause, { persist = true })
+  elseif pause and (os.time() >= pause.ends_at
+      or (watering and os.time() - (pause.set_at or 0) > 30)) then
+    -- Ended, or resumed elsewhere (watering with no pause entry; the first
+    -- 30 s after pausing are skipped while RainMachine adds the entry).
+    pause = nil
+    device:set_field(PAUSE_FIELD, nil, { persist = true })
+  end
+  if device:supports_capability_by_id(PAUSE_CAP.ID) then
+    device:emit_event(PAUSE_CAP.pause(pause and pause.value or "off"))
+  end
+  if pause and ctx.local_now then
+    status = "Paused until " .. display.clock(ctx.local_now + (pause.ends_at - os.time()))
+  end
   local stopped_at = device:get_field(STOPPED_AT_FIELD)
   if stopped_at then
     if watering or os.time() - stopped_at > STOPPED_SHOW_SECONDS then
@@ -1139,37 +1181,6 @@ local function watering_minutes(device)
   return tonumber(value) or DEFAULT_WATERING_MINUTES
 end
 
---- The program's zones (run order) and its data, read fresh.
-local function program_and_zones(parent, client, uid)
-  local p = client:get("program/" .. uid)
-  if not p or not p.wateringTimes then
-    return nil
-  end
-  local dedicated = parent:get_field(DEDICATED_MV_FIELD) == true
-  return p, display.program_zones(p, function(zid) return dedicated and zid == 1 end)
-end
-
---- Stops the program, including leftovers of its zones queued on their own.
-local function stop_program(driver, device, uid)
-  local parent, client = command_client(device)
-  send(driver, device, "program/" .. uid .. "/stop", { pid = uid })
-  local active = parent and parent:get_field(ACTIVE_PROGRAMS_FIELD)
-  if not (active and active[uid]) then
-    return
-  end
-  local _, zones = program_and_zones(parent, client, uid)
-  local in_program = {}
-  for _, z in ipairs(zones or {}) do
-    in_program[z.zid] = true
-  end
-  local q = client:get("watering/queue")
-  for _, e in ipairs((q and q.queue) or {}) do
-    if (not e.pid or e.pid == 0) and in_program[e.zid] then
-      send(driver, device, "zone/" .. e.zid .. "/stop", { zid = e.zid })
-    end
-  end
-end
-
 local function switch_on(driver, device, command)
   local kind, uid = child_kind(device)
   if kind == "zone" then
@@ -1186,12 +1197,14 @@ local function switch_off(driver, device, command)
   if kind == "zone" then
     send(driver, device, "zone/" .. uid .. "/stop", { zid = uid })
   elseif kind == "program" then
-    stop_program(driver, device, uid)
+    send(driver, device, "program/" .. uid .. "/stop", { pid = uid })
   end
 end
 
---- Changing Watering Time while the zone is on restarts it with the new
---- time, so a run can be shortened or extended without stopping it first.
+--- Changing Watering Time while the zone is on changes that run in place,
+--- the same call as moving the zone's slider in the RainMachine app: the new
+--- time becomes the run's total, and the zone keeps its place in the queue
+--- (verified 2026-10-19).
 local function set_watering_time(driver, device, command)
   local minutes = math.max(1, math.min(120, math.floor(tonumber(command.args.minutes) or DEFAULT_WATERING_MINUTES)))
   device:emit_event(WATERING_TIME_CAP.wateringTime({ value = minutes, unit = "min" }))
@@ -1199,8 +1212,7 @@ local function set_watering_time(driver, device, command)
   device:set_field(WT_OVERRIDE_FIELD, true, { persist = true })
   local kind, uid = child_kind(device)
   if kind == "zone" and device:get_latest_state("main", capabilities.switch.ID, "switch") == "on" then
-    log.info("RainMachine " .. tostring(device.label) .. " is on: restarting it for " .. minutes .. " min")
-    send(driver, device, "zone/" .. uid .. "/stop", { zid = uid })
+    log.info("RainMachine " .. tostring(device.label) .. " is on: changing this run to " .. minutes .. " min")
     send(driver, device, "zone/" .. uid .. "/start", { time = minutes * 60 })
   end
 end
@@ -1208,6 +1220,23 @@ end
 local function set_rain_delay(driver, device, command)
   local days = math.max(0, math.min(14, math.floor(tonumber(command.args.days) or 0)))
   send(driver, device, "restrictions/raindelay", { rainDelay = days })
+end
+
+--- Pause Watering: the same call as Pause in the RainMachine app
+--- (watering/pauseall, duration in seconds; 0 resumes). The app always
+--- pauses 30 min; here 15 min to 2 h.
+local function set_pause(driver, device, command)
+  local value = tostring(command.args.value)
+  local minutes = tonumber(value)
+  if not minutes or minutes <= 0 then
+    device:set_field(PAUSE_FIELD, nil, { persist = true })
+    device:emit_event(PAUSE_CAP.pause("off"))
+    send(driver, device, "watering/pauseall", { duration = 0 })
+    return
+  end
+  device:set_field(PAUSE_FIELD, { value = value, ends_at = os.time() + minutes * 60, set_at = os.time() }, { persist = true })
+  device:emit_event(PAUSE_CAP.pause(value))
+  send(driver, device, "watering/pauseall", { duration = minutes * 60 })
 end
 
 local function stop_all(driver, device, command)
@@ -1329,6 +1358,9 @@ local rainmachine_driver = Driver("rainmachine-lan", {
     },
     [STOP_ALL_CAP.ID] = {
       [STOP_ALL_CAP.commands.push.NAME] = stop_all,
+    },
+    [PAUSE_CAP.ID] = {
+      [PAUSE_CAP.commands.setPause.NAME] = set_pause,
     },
     [capabilities.refresh.ID] = {
       [capabilities.refresh.commands.refresh.NAME] = refresh,

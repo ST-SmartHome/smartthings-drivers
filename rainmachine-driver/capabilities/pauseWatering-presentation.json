@@ -1,0 +1,103 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{pause.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Pause Watering",
+   "displayType": "list",
+   "list": {
+    "command": {
+     "name": "setPause",
+     "alternatives": [
+      {
+       "key": "off",
+       "value": "Not paused"
+      },
+      {
+       "key": "15",
+       "value": "15 min"
+      },
+      {
+       "key": "30",
+       "value": "30 min"
+      },
+      {
+       "key": "60",
+       "value": "1 h"
+      },
+      {
+       "key": "120",
+       "value": "2 h"
+      }
+     ]
+    },
+    "state": {
+     "value": "pause.value",
+     "alternatives": [
+      {
+       "key": "off",
+       "value": "Not paused"
+      },
+      {
+       "key": "15",
+       "value": "15 min"
+      },
+      {
+       "key": "30",
+       "value": "30 min"
+      },
+      {
+       "key": "60",
+       "value": "1 h"
+      },
+      {
+       "key": "120",
+       "value": "2 h"
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "automation": {
+  "conditions": [],
+  "actions": [
+   {
+    "label": "Pause Watering",
+    "displayType": "list",
+    "list": {
+     "alternatives": [
+      {
+       "key": "off",
+       "value": "Not paused"
+      },
+      {
+       "key": "15",
+       "value": "15 min"
+      },
+      {
+       "key": "30",
+       "value": "30 min"
+      },
+      {
+       "key": "60",
+       "value": "1 h"
+      },
+      {
+       "key": "120",
+       "value": "2 h"
+      }
+     ],
+     "value": "pause.value"
+    }
+   }
+  ]
+ }
+}

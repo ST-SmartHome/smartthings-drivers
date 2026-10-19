@@ -12,8 +12,9 @@ Community thread: https://community.smartthings.com/t/st-edge-rainmachine-lan-dr
   - Weather Forecast for today and tomorrow;
   - Weather Today;
   - Rain Delay (0–14 days);
+  - **Pause Watering** (15 min, 30 min, 1 h or 2 h, or Not paused to resume). Like Pause in the RainMachine app: running zones wait and carry on where they stopped. A pause started in the RainMachine app shows here too, as "Paused until 16:45";
   - Stop All Watering.
-- **Zone N: <name>**, one per active zone. The switch waters for the zone's **Watering Time** (1–120 min, adjustable while running).
+- **Zone N: <name>**, one per active zone. The switch waters for the zone's **Watering Time** (1–120 min). Changing it while the zone runs changes that run in place, like the zone's slider in the RainMachine app.
   - Watering Time follows the zone's weather-adjusted time for its next scheduled run. A time you set yourself is kept until that zone's next run ends.
   - Tiles:
     - Time Remaining;
@@ -23,7 +24,7 @@ Community thread: https://community.smartthings.com/t/st-edge-rainmachine-lan-dr
   - Read-only zone settings from the RainMachine app: **Soil Type**, **Vegetation Type**, **Sprinkler Heads**, **Slope**, **Exposure**.
 - **Program: <name>**, one per active program. The switch starts or stops it, exactly like Run in the RainMachine app (RainMachine runs a manual start at the program's set times). Next Run is shown.
   - One tile per zone in run order, with today's weather-adjusted minutes and start time.
-  - While it runs: 💦 watering, ⏳ queued with its start time, ✅ done. A zone cut short with the Watering Time slider and re-queued by RainMachine still shows as part of the program.
+  - While it runs: 💦 watering, ⏳ queued with its start time, ✅ done.
 
 Zone and program devices are created once the driver has logged in and read them. They are never deleted automatically: an inactive or removed zone shows offline. A device you delete stays deleted until you run **Scan Nearby** again.
 
@@ -57,7 +58,8 @@ The master valve never gets a device. RainMachine opens it automatically wheneve
 ## Notes
 
 - Schedules, zone durations and restrictions are set in the RainMachine app. The driver shows them and controls watering, but doesn't edit programs.
-- **Stop All** stops what's running and clears the queue. It doesn't cancel future schedules; use Rain Delay for that.
+- **Stop All** stops what's running and clears the queue. **Pause Watering** holds it and carries on afterwards. Neither cancels future schedules; use Rain Delay for that.
+- Every command is the same API call RainMachine's own app makes, so starting, stopping, pausing and changing times behave as they do in the app.
 - The SmartThings app may show the values from your last visit when you open the page, and update them slowly. Pull down to refresh.
 - After a driver update that adds tiles, open each zone and program device once (or pull down to refresh) so the app shows them.
 - **Tested** on a Pro-8; an HD-12 has been confirmed by a community user. Reports from Mini-8, HD-16, Pro-16 and 1st-generation Touch owners are welcome.

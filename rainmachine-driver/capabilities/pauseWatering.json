@@ -1,0 +1,49 @@
+{
+ "name": "Pause Watering",
+ "attributes": {
+  "pause": {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "value": {
+      "type": "string",
+      "enum": [
+       "off",
+       "15",
+       "30",
+       "60",
+       "120"
+      ]
+     }
+    },
+    "additionalProperties": false,
+    "required": [
+     "value"
+    ]
+   },
+   "setter": "setPause",
+   "enumCommands": []
+  }
+ },
+ "commands": {
+  "setPause": {
+   "name": "setPause",
+   "arguments": [
+    {
+     "name": "value",
+     "optional": false,
+     "schema": {
+      "type": "string",
+      "enum": [
+       "off",
+       "15",
+       "30",
+       "60",
+       "120"
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

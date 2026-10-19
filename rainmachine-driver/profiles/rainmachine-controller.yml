@@ -1,4 +1,4 @@
-name: rainmachine-controller.v5
+name: rainmachine-controller.v6
 components:
   - id: main
     label: "RainMachine"
@@ -12,6 +12,8 @@ components:
       - id: aboutisland47519.weatherToday
         version: 1
       - id: aboutisland47519.rainDelay
+        version: 1
+      - id: aboutisland47519.pauseWatering
         version: 1
       - id: aboutisland47519.stopAllWatering
         version: 1
