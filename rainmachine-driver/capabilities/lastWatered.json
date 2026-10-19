@@ -1,0 +1,22 @@
+{
+ "name": "Last Watered",
+ "attributes": {
+  "lastWatered": {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "value": {
+      "type": "string",
+      "maxLength": 100
+     }
+    },
+    "additionalProperties": false,
+    "required": [
+     "value"
+    ]
+   },
+   "enumCommands": []
+  }
+ },
+ "commands": {}
+}

@@ -1,0 +1,20 @@
+name: rainmachine-program-1.v3
+components:
+  - id: main
+    label: "Program"
+    capabilities:
+      - id: switch
+        version: 1
+      - id: aboutisland47519.nextRun
+        version: 1
+      - id: refresh
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z1
+    label: "1st"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation

@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{vegetationType.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Vegetation Type",
+   "displayType": "state",
+   "state": {
+    "label": "{{vegetationType.value}}"
+   }
+  }
+ ]
+}

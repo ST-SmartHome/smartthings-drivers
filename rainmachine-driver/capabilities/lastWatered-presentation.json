@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{lastWatered.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Last Watered",
+   "displayType": "state",
+   "state": {
+    "label": "{{lastWatered.value}}"
+   }
+  }
+ ]
+}

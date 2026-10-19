@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{sprinklerHeads.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Sprinkler Heads",
+   "displayType": "state",
+   "state": {
+    "label": "{{sprinklerHeads.value}}"
+   }
+  }
+ ]
+}

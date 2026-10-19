@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{slope.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Slope",
+   "displayType": "state",
+   "state": {
+    "label": "{{slope.value}}"
+   }
+  }
+ ]
+}

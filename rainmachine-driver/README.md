@@ -7,14 +7,23 @@ Community thread: https://community.smartthings.com/t/st-edge-rainmachine-lan-dr
 ## Devices
 
 - **RainMachine** (controller):
-  - Irrigation Status (e.g. "Watering Zone 1, 4 min left", "2 zones queued", "Paused: rain delay", "Stopped by user");
+  - Irrigation Status. While a program runs it shows the program, the running zone and when everything finishes (e.g. "Evening: Zone 1 5 min, done 20:30"). Otherwise e.g. "Watering Zone 1, 4 min left", "2 zones queued", "Paused: rain delay", "Stopped by user";
   - Next Watering, with RainMachine's own calculated run time, or the reason when it will skip (e.g. "Skipped: Rain");
   - Weather Forecast for today and tomorrow;
   - Weather Today;
   - Rain Delay (0–14 days);
   - Stop All Watering.
-- **Zone N: <name>**, one per active zone. The switch waters for the zone's **Watering Time** (1–120 min, adjustable while running). Time Remaining is shown.
-- **Program: <name>**, one per active program. The switch starts or stops it. Next Run is shown.
+- **Zone N: <name>**, one per active zone. The switch waters for the zone's **Watering Time** (1–120 min, adjustable while running).
+  - Watering Time follows the zone's weather-adjusted time for its next scheduled run. A time you set yourself is kept until that zone's next run ends.
+  - Tiles:
+    - Time Remaining;
+    - **Last Watered** (when and how long);
+    - **Next Watering** (when and how long, or why it will skip);
+    - **Last Seven Days** (total watering time).
+  - Read-only zone settings from the RainMachine app: **Soil Type**, **Vegetation Type**, **Sprinkler Heads**, **Slope**, **Exposure**.
+- **Program: <name>**, one per active program. The switch starts or stops it, exactly like Run in the RainMachine app (RainMachine runs a manual start at the program's set times). Next Run is shown.
+  - One tile per zone in run order, with today's weather-adjusted minutes and start time.
+  - While it runs: 💦 watering, ⏳ queued with its start time, ✅ done. A zone cut short with the Watering Time slider and re-queued by RainMachine still shows as part of the program.
 
 Zone and program devices are created once the driver has logged in and read them. They are never deleted automatically: an inactive or removed zone shows offline. A device you delete stays deleted until you run **Scan Nearby** again.
 
@@ -50,6 +59,7 @@ The master valve never gets a device. RainMachine opens it automatically wheneve
 - Schedules, zone durations and restrictions are set in the RainMachine app. The driver shows them and controls watering, but doesn't edit programs.
 - **Stop All** stops what's running and clears the queue. It doesn't cancel future schedules; use Rain Delay for that.
 - The SmartThings app may show the values from your last visit when you open the page, and update them slowly. Pull down to refresh.
+- After a driver update that adds tiles, open each zone and program device once (or pull down to refresh) so the app shows them.
 - **Tested** on a Pro-8; an HD-12 has been confirmed by a community user. Reports from Mini-8, HD-16, Pro-16 and 1st-generation Touch owners are welcome.
 - **One controller per hub** for now.
 
@@ -57,6 +67,7 @@ The master valve never gets a device. RainMachine opens it automatically wheneve
 
 - `src/rm_api.lua`: local API client (login, token renewal; URLs are never logged because the token is a query parameter).
 - `src/init.lua`: polling, child devices, status, weather and forecast, commands, connection health.
+- `src/display.lua`: the text for the program zone tiles, Irrigation Status while a program runs, and the zone history tiles (no SmartThings modules, so it can be tested off the hub).
 - `src/discovery.lua`: mDNS lookup (`_http._tcp` / `_hap._tcp`, instance name containing "rainmachine") and creation of the first controller.
 - `capabilities/`: the custom capability definitions and presentations (namespace `aboutisland47519`).
 

@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{lastSevenDays.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Last Seven Days",
+   "displayType": "state",
+   "state": {
+    "label": "{{lastSevenDays.value}}"
+   }
+  }
+ ]
+}

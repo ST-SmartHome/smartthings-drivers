@@ -1,0 +1,118 @@
+name: rainmachine-program-15.v3
+components:
+  - id: main
+    label: "Program"
+    capabilities:
+      - id: switch
+        version: 1
+      - id: aboutisland47519.nextRun
+        version: 1
+      - id: refresh
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z1
+    label: "1st"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z2
+    label: "2nd"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z3
+    label: "3rd"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z4
+    label: "4th"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z5
+    label: "5th"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z6
+    label: "6th"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z7
+    label: "7th"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z8
+    label: "8th"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z9
+    label: "9th"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z10
+    label: "10th"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z11
+    label: "11th"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z12
+    label: "12th"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z13
+    label: "13th"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z14
+    label: "14th"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation
+  - id: z15
+    label: "15th"
+    capabilities:
+      - id: aboutisland47519.zone
+        version: 1
+    categories:
+      - name: Irrigation

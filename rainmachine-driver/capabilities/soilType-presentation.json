@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{soilType.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Soil Type",
+   "displayType": "state",
+   "state": {
+    "label": "{{soilType.value}}"
+   }
+  }
+ ]
+}

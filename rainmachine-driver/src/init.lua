@@ -4,8 +4,12 @@
 ---   controller (one per RainMachine): irrigation status, rain delay,
 ---     "Stop all watering", and the IP/password settings;
 ---   one child device per active zone: switch (on = water for the zone's
----     Watering Time), Watering Time, Time Remaining;
----   one child device per active program: switch (start/stop), Next Run.
+---     Watering Time), Watering Time, Time Remaining, Last watered, Next
+---     watering, Last 7 days, and the zone's setup from the RainMachine app
+---     (soil, vegetation, sprinkler heads, slope, exposure; read only);
+---   one child device per active program: switch (start/stop), Next Run,
+---     and one tile per zone in run order (minutes and start time; while it
+---     runs, which zone is watering, queued or done).
 ---
 --- Children are created as zones/programs are found. They are never deleted
 --- automatically: a zone that goes inactive or disappears marks its device
@@ -19,6 +23,7 @@ local log = require "log"
 
 local Client = require "rm_api"
 local discovery = require "discovery"
+local display = require "display"
 
 local STATUS_CAP = capabilities["aboutisland47519.irrigationStatus"]
 local RAIN_DELAY_CAP = capabilities["aboutisland47519.rainDelay"]
@@ -29,10 +34,27 @@ local NEXT_RUN_CAP = capabilities["aboutisland47519.nextRun"]
 local NEXT_WATERING_CAP = capabilities["aboutisland47519.nextWatering"]
 local FORECAST_CAP = capabilities["aboutisland47519.weatherForecast"]
 local WEATHER_CAP = capabilities["aboutisland47519.weatherToday"]
+-- The app titles these tiles with the capability's name (not its
+-- presentation label), so each is named exactly as its tile reads. Zones
+-- reuse the controller's Next Watering.
+local PROGRAM_ZONE_CAP = capabilities["aboutisland47519.zone"]
+local LAST_WATERED_CAP = capabilities["aboutisland47519.lastWatered"]
+local LAST_7_DAYS_CAP = capabilities["aboutisland47519.lastSevenDays"]
+local SOIL_CAP = capabilities["aboutisland47519.soilType"]
+local VEGETATION_CAP = capabilities["aboutisland47519.vegetationType"]
+local SPRINKLER_CAP = capabilities["aboutisland47519.sprinklerHeads"]
+local SLOPE_CAP = capabilities["aboutisland47519.slope"]
+local EXPOSURE_CAP = capabilities["aboutisland47519.exposure"]
 
 local CONTROLLER_PROFILE = "rainmachine-controller.v5"
-local ZONE_PROFILE = "rainmachine-zone.v1"
-local PROGRAM_PROFILE = "rainmachine-program.v1"
+local ZONE_PROFILE = "rainmachine-zone.v3"
+local PROGRAM_MAX_SLOTS = 16
+
+--- A program device has one zone tile per zone in the program
+--- (profiles rainmachine-program-1.v3 … -16.v3).
+local function program_profile(slots)
+  return string.format("rainmachine-program-%d.v3", math.max(1, math.min(PROGRAM_MAX_SLOTS, slots)))
+end
 
 local DEFAULT_WATERING_MINUTES = 10
 local WATERING_POLL_SECONDS = 10
@@ -45,6 +67,23 @@ local STOPPED_SHOW_SECONDS = 30 * 60
 local PCT_BY_DAY_FIELD = "watering_pct_by_day"
 local DETAILS_FIELD = "program_day_details"
 local MAX_COEF_FIELD = "max_watering_coef"
+local TZ_OFFSET_FIELD = "local_offset"
+local HISTORY_FIELD = "zone_history"
+local HISTORY_DAYS = 30
+local PROPS_FIELD = "zone_properties"
+local PROPS_LAST_FIELD = "zone_properties_last"
+local PROPS_REFRESH_SECONDS = 3 * 3600
+local WAS_WATERING_FIELD = "was_watering"
+local EMIT_CACHE_FIELD = "emit_cache"
+local ACTIVE_PROGRAMS_FIELD = "active_programs"
+local SEEN_ZONES_FIELD = "seen_zones"
+local WT_OVERRIDE_FIELD = "watering_time_override"
+local LAST_STATE_FIELD = "last_zone_state"
+local PROFILE_TRY_FIELD = "profile_switch_tried"
+local PROFILE_RETRY_SECONDS = 120
+local STATUS_MAX = 58 -- schema maxLength 60
+local NEXT_WATERING_MAX = 38 -- schema maxLength 40
+local TILE_MAX = 90 -- schema maxLength 100
 
 local CLIENT_FIELD = "client"
 local CLIENT_KEY_FIELD = "client_key"
@@ -527,6 +566,56 @@ local function today_weather(day)
   return condition_icon(day) .. table.concat(parts, " ")
 end
 
+--- The controller's local time minus UTC, from machine/time (timestamp is
+--- UTC epoch, appDate its wall clock). Rounded to 15 minutes.
+local function store_offset(device, now)
+  local wall = now and display.civil(now.appDate)
+  local ts = now and tonumber(now.timestamp)
+  if wall and ts then
+    device:set_field(TZ_OFFSET_FIELD, math.floor((wall - ts) / 900 + 0.5) * 900)
+  end
+end
+
+--- The controller's wall clock on display.civil()'s scale, or nil.
+local function local_now(device)
+  local offset = device:get_field(TZ_OFFSET_FIELD)
+  return offset and (os.time() + offset) or nil
+end
+
+--- Last watered and the last 7 days for every zone, from the watering log
+--- (HISTORY_DAYS days, ending today). Refreshed with the forecast and when
+--- watering stops.
+local function refresh_history(device, client)
+  local now = local_now(device)
+  if not now then
+    return
+  end
+  local today = display.civil(os.date("!%Y-%m-%d", now))
+  local from = os.date("!%Y-%m-%d", today - (HISTORY_DAYS - 1) * 86400)
+  local log_data = client:get("watering/log/details/" .. from .. "/" .. HISTORY_DAYS)
+  if log_data and log_data.waterLog then
+    device:set_field(HISTORY_FIELD, display.zone_history(log_data, today - 6 * 86400))
+  end
+end
+
+--- Soil, vegetation, sprinkler heads, slope and exposure per zone (read
+--- only; set in the RainMachine app). Rarely changes.
+local function refresh_properties(device, client, force)
+  local last = device:get_field(PROPS_LAST_FIELD)
+  if not force and last and os.time() - last < PROPS_REFRESH_SECONDS then
+    return
+  end
+  local data = client:get("zone/properties")
+  if data and data.zones then
+    local by_uid = {}
+    for _, z in ipairs(data.zones) do
+      by_uid[z.uid] = { soil = z.soil, vegetation = z.type, sprinkler = z.group_id, slope = z.slope, sun = z.sun }
+    end
+    device:set_field(PROPS_FIELD, by_uid)
+    device:set_field(PROPS_LAST_FIELD, os.time())
+  end
+end
+
 --- "Today 23–34 °C, no rain · Tomorrow 23–36 °C, 0.4 mm (50%)", from the
 --- controller's own weather mix. Refreshed every FORECAST_REFRESH_SECONDS.
 local function update_forecast(device, client, force)
@@ -539,6 +628,7 @@ local function update_forecast(device, client, force)
   if not today then
     return
   end
+  store_offset(device, now)
   -- Re-read the unit setting so a change in the RainMachine app shows up
   -- within one refresh.
   local provision = client:get("provision")
@@ -576,18 +666,30 @@ local function update_forecast(device, client, force)
       local day_key = tostring(d.day or ""):sub(1, 10)
       by_day[day_key] = {}
       for _, prog in ipairs(d.programs or {}) do
-        local secs, flag = 0, nil
+        local secs, flag, per_zone = 0, nil, {}
         for _, z in ipairs(prog.zones or {}) do
-          secs = secs + (tonumber(z.computedWateringTime) or 0)
+          local zsecs = tonumber(z.computedWateringTime) or 0
+          secs = secs + zsecs
           local f = tonumber(z.wateringFlag)
           if f and f ~= 0 and not flag then
             flag = f
           end
+          if z.id then
+            per_zone[z.id] = { seconds = zsecs, flag = (f and f ~= 0) and f or nil }
+          end
         end
-        by_day[day_key][prog.id] = { seconds = secs, flag = flag }
+        by_day[day_key][prog.id] = { seconds = secs, flag = flag, zones = per_zone }
       end
     end
     device:set_field(DETAILS_FIELD, by_day)
+  end
+  local ok, err = pcall(refresh_history, device, client)
+  if not ok then
+    log.warn("RainMachine watering log failed: " .. tostring(err))
+  end
+  ok, err = pcall(refresh_properties, device, client, false)
+  if not ok then
+    log.warn("RainMachine zone properties failed: " .. tostring(err))
   end
   if device:supports_capability_by_id(WEATHER_CAP.ID) then
     -- Actual readings when a source reports them, otherwise RainMachine's
@@ -626,11 +728,164 @@ local function status_text(zones, restrictions)
   return "Idle"
 end
 
-local function apply_status(driver, device, zones, programs, restrictions, s)
+--- Emits a component's value only when it changed since the last emit (up
+--- to 16 program slots and 8 zone tiles each, every 10 s while watering).
+--- Skips components the device's profile doesn't have yet: a profile
+--- switch takes effect a moment after try_update_metadata.
+local function emit_changed(child, comp_id, cap, attr, value)
+  local cache = child:get_field(EMIT_CACHE_FIELD) or {}
+  local key = comp_id .. "/" .. cap.ID
+  if cache[key] == value then
+    return
+  end
+  local comp = child.profile and child.profile.components and child.profile.components[comp_id]
+  if not comp or not child:supports_capability_by_id(cap.ID, comp_id) then
+    return
+  end
+  child:emit_component_event(comp, cap[attr](value))
+  cache[key] = value
+  child:set_field(EMIT_CACHE_FIELD, cache)
+end
+
+--- Moves a child to the wanted profile, at most every PROFILE_RETRY_SECONDS
+--- while the switch hasn't shown up.
+local function ensure_profile(child, wanted)
+  local last = child:get_field(PROFILE_TRY_FIELD)
+  if last and last.profile == wanted and os.time() - last.at < PROFILE_RETRY_SECONDS then
+    return
+  end
+  log.info("RainMachine switching " .. tostring(child.label) .. " to profile " .. wanted)
+  child:try_update_metadata({ profile = wanted })
+  child:set_field(PROFILE_TRY_FIELD, { profile = wanted, at = os.time() })
+  child:set_field(EMIT_CACHE_FIELD, nil)
+end
+
+local function program_has_slots(child, slots)
+  local comps = child.profile and child.profile.components or {}
+  return comps["z" .. slots] ~= nil and comps["z" .. (slots + 1)] == nil
+    and child:supports_capability_by_id(PROGRAM_ZONE_CAP.ID, "z1")
+end
+
+local function update_program_slots(child, p, zone_list, ctx)
+  local slots = math.max(1, math.min(PROGRAM_MAX_SLOTS, #zone_list))
+  if not program_has_slots(child, slots) then
+    ensure_profile(child, program_profile(#zone_list))
+  end
+  local texts = #zone_list > 0 and display.program_slots(p, zone_list, ctx) or { "No active zones" }
+  for i = 1, slots do
+    emit_changed(child, "z" .. i, PROGRAM_ZONE_CAP, "zone", display.fit({ texts[i] or "" }, TILE_MAX))
+  end
+end
+
+local function update_zone_tiles(device, child, uid, ctx)
+  if not child:supports_capability_by_id(LAST_WATERED_CAP.ID) then
+    ensure_profile(child, ZONE_PROFILE)
+    return
+  end
+  local history = device:get_field(HISTORY_FIELD)
+  if history then
+    local h = history[uid]
+    emit_changed(child, "main", LAST_WATERED_CAP, "lastWatered", display.fit({ display.last_watered_text(h, ctx.local_now, HISTORY_DAYS) }, TILE_MAX))
+    emit_changed(child, "main", LAST_7_DAYS_CAP, "lastSevenDays", display.week_text(h))
+  end
+  local next_text = display.zone_next_text(uid, ctx.plans, ctx.local_now)
+  emit_changed(child, "main", NEXT_WATERING_CAP, "nextWatering",
+    display.fit({ next_text, (next_text:gsub("skipped:\u{00A0}", "")) }, NEXT_WATERING_MAX))
+  local props = device:get_field(PROPS_FIELD)
+  local pz = props and props[uid]
+  if pz then
+    emit_changed(child, "main", SOIL_CAP, "soilType", display.setup_text(display.SOIL, pz.soil))
+    emit_changed(child, "main", VEGETATION_CAP, "vegetationType", display.setup_text(display.VEGETATION, pz.vegetation))
+    emit_changed(child, "main", SPRINKLER_CAP, "sprinklerHeads", display.setup_text(display.SPRINKLER, pz.sprinkler))
+    emit_changed(child, "main", SLOPE_CAP, "slope", display.setup_text(display.SLOPE, pz.slope))
+    emit_changed(child, "main", EXPOSURE_CAP, "exposure", display.setup_text(display.EXPOSURE, pz.sun))
+  end
+end
+
+--- Watering Time follows the zone's weather-adjusted time in its next
+--- scheduled program. A value the user sets is kept until that zone's next
+--- run ends (user decisions 2026-10-19), then it follows the program again.
+local function sync_watering_time(child, z, program_minutes)
+  local last = child:get_field(LAST_STATE_FIELD)
+  child:set_field(LAST_STATE_FIELD, z.state)
+  if child:get_field(WT_OVERRIDE_FIELD) then
+    if last and last ~= 0 and z.state == 0 then
+      child:set_field(WT_OVERRIDE_FIELD, nil, { persist = true })
+      log.info("RainMachine " .. tostring(child.label) .. " run ended: Watering Time follows the program again")
+    else
+      return
+    end
+  end
+  if z.state ~= 0 or not program_minutes then
+    return
+  end
+  local current = child:get_latest_state("main", WATERING_TIME_CAP.ID, "wateringTime")
+  if tonumber(current) ~= program_minutes then
+    child:emit_event(WATERING_TIME_CAP.wateringTime({ value = program_minutes, unit = "min" }))
+  end
+end
+
+local function apply_status(driver, device, zones, programs, restrictions, s, queue)
   local dedicated = device:get_field(DEDICATED_MV_FIELD) == true
   local existing = children_of(driver, device)
   local seen = {}
   local watering = false
+
+  local zone_names, master = {}, {}
+  for _, z in ipairs(zones) do
+    zone_names[z.uid] = tostring(z.name)
+    master[z.uid] = is_master_valve(z, dedicated)
+  end
+  local function is_master(zid)
+    return master[zid] == true or (dedicated and zid == 1)
+  end
+  local ctx = {
+    queue = queue or {},
+    local_now = local_now(device),
+    details = device:get_field(DETAILS_FIELD),
+    pct_by_day = device:get_field(PCT_BY_DAY_FIELD),
+    max_coef = device:get_field(MAX_COEF_FIELD),
+    plans = {},
+  }
+  local program_names, zone_lists, zone_sets = {}, {}, {}
+  for _, p in ipairs(programs) do
+    program_names[p.uid] = tostring(p.name)
+    zone_lists[p.uid] = display.program_zones(p, is_master)
+    zone_sets[p.uid] = {}
+    for _, z in ipairs(zone_lists[p.uid]) do
+      zone_sets[p.uid][z.zid] = true
+    end
+    if p.active ~= false then
+      table.insert(ctx.plans, {
+        first = display.program_next_start(p),
+        items = display.next_run_plan(p, zone_lists[p.uid], ctx.details, ctx.pct_by_day, ctx.max_coef),
+      })
+    end
+  end
+  local set_entries = {}
+  for _, p in ipairs(programs) do
+    set_entries[#set_entries + 1] = { p = p, zones = zone_lists[p.uid],
+      items = display.next_run_plan(p, zone_lists[p.uid], ctx.details, ctx.pct_by_day, ctx.max_coef) }
+  end
+  -- Leftovers of a program's zones belong to it; remember which zones each
+  -- running program has had in the queue (done vs skipped).
+  local active
+  ctx.queue, active = display.adopt(ctx.queue, zone_sets, device:get_field(ACTIVE_PROGRAMS_FIELD))
+  device:set_field(ACTIVE_PROGRAMS_FIELD, active)
+  local seen = device:get_field(SEEN_ZONES_FIELD) or {}
+  for pid in pairs(seen) do
+    if not active[pid] then
+      seen[pid] = nil
+    end
+  end
+  for _, e in ipairs(ctx.queue) do
+    if e.pid and active[e.pid] then
+      seen[e.pid] = seen[e.pid] or {}
+      seen[e.pid][e.zid] = true
+    end
+  end
+  device:set_field(SEEN_ZONES_FIELD, seen)
+  ctx.seen = seen
 
   for _, z in ipairs(zones) do
     if z.state ~= 0 then
@@ -645,6 +900,14 @@ local function apply_status(driver, device, zones, programs, restrictions, s)
         set_child_online(child, true)
         child:emit_event(capabilities.switch.switch(z.state ~= 0 and "on" or "off"))
         child:emit_event(TIME_REMAINING_CAP.timeRemaining({ value = z.state == 1 and minutes_up(z.remaining) or 0, unit = "min" }))
+        local ok, err = pcall(update_zone_tiles, device, child, z.uid, ctx)
+        if not ok then
+          log.warn("RainMachine " .. tostring(child.label) .. " tiles failed: " .. tostring(err))
+        end
+        ok, err = pcall(sync_watering_time, child, z, display.program_minutes(z.uid, set_entries))
+        if not ok then
+          log.warn("RainMachine " .. tostring(child.label) .. " Watering Time sync failed: " .. tostring(err))
+        end
       else
         set_child_online(child, false, z.active ~= false and "zone is now the master valve; RainMachine opens it automatically" or "zone is inactive in RainMachine")
       end
@@ -660,13 +923,18 @@ local function apply_status(driver, device, zones, programs, restrictions, s)
     if child then
       if p.active ~= false then
         set_child_online(child, true)
-        child:emit_event(capabilities.switch.switch((p.status or 0) ~= 0 and "on" or "off"))
+        local running = (p.status or 0) ~= 0 or active[p.uid] == true
+        child:emit_event(capabilities.switch.switch(running and "on" or "off"))
         local next_run = "Not scheduled"
         if p.nextRun then
           local params = p.startTimeParams or {}
           next_run = p.nextRun .. ((params.type or 0) == 0 and (" " .. tostring(p.startTime)) or "")
         end
         child:emit_event(NEXT_RUN_CAP.nextRun(next_run))
+        local ok, err = pcall(update_program_slots, child, p, zone_lists[p.uid], ctx)
+        if not ok then
+          log.warn("RainMachine " .. tostring(child.label) .. " zone tiles failed: " .. tostring(err))
+        end
       else
         set_child_online(child, false, "program is inactive in RainMachine")
       end
@@ -675,7 +943,7 @@ local function apply_status(driver, device, zones, programs, restrictions, s)
       end
     elseif p.active ~= false then
       -- "Program: <name>"; set at creation only.
-      request_child(driver, device, "program", p.uid, "Program: " .. tostring(p.name), PROGRAM_PROFILE)
+      request_child(driver, device, "program", p.uid, "Program: " .. tostring(p.name), program_profile(#zone_lists[p.uid]))
     end
   end
 
@@ -688,18 +956,24 @@ local function apply_status(driver, device, zones, programs, restrictions, s)
   -- After "Stop all watering", show that it worked until watering starts
   -- again or STOPPED_SHOW_SECONDS pass (RainMachine keeps no such state).
   local status = status_text(zones, restrictions)
+  local ok, program_line = pcall(display.program_status, ctx.queue, program_names, zone_names, ctx.local_now, STATUS_MAX)
+  if ok and program_line then
+    status = program_line
+  elseif not ok then
+    log.warn("RainMachine program status failed: " .. tostring(program_line))
+  end
   local stopped_at = device:get_field(STOPPED_AT_FIELD)
   if stopped_at then
     if watering or os.time() - stopped_at > STOPPED_SHOW_SECONDS then
-      device:set_field(STOPPED_AT_FIELD, nil)
+      device:set_field(STOPPED_AT_FIELD, nil, { persist = true })
     elseif status == "Idle" then
       status = "Stopped by user"
     end
   end
-  device:emit_event(STATUS_CAP.status(status))
+  device:emit_event(STATUS_CAP.status(display.fit({ status }, STATUS_MAX)))
   if device:supports_capability_by_id(NEXT_WATERING_CAP.ID) then
-    device:emit_event(NEXT_WATERING_CAP.nextWatering(next_watering_text(programs,
-      device:get_field(PCT_BY_DAY_FIELD), device:get_field(MAX_COEF_FIELD), device:get_field(DETAILS_FIELD))))
+    local text = next_watering_text(programs, device:get_field(PCT_BY_DAY_FIELD), device:get_field(MAX_COEF_FIELD), device:get_field(DETAILS_FIELD))
+    device:emit_event(NEXT_WATERING_CAP.nextWatering(display.fit({ text, (text:gsub(" Skipped: ", " ")) }, NEXT_WATERING_MAX)))
   end
   local delay_days = 0
   if restrictions and restrictions.rainDelay then
@@ -755,13 +1029,38 @@ local function poll_once(driver, device)
   end
   local restrictions = client:get("restrictions/currently")
   mark_online(device)
+  if not device:get_field(TZ_OFFSET_FIELD) then
+    store_offset(device, client:get("machine/time"))
+  end
   if device:supports_capability_by_id(FORECAST_CAP.ID) then
     local ok, err = pcall(update_forecast, device, client, false)
     if not ok then
       log.warn("RainMachine forecast failed: " .. tostring(err))
     end
   end
-  return apply_status(driver, device, zones.zones or {}, programs.programs or {}, restrictions, s)
+  -- The queue (run order, seconds left) only while something waters.
+  local queue
+  local busy = false
+  for _, z in ipairs(zones.zones or {}) do
+    busy = busy or (z.state or 0) ~= 0
+  end
+  for _, p in ipairs(programs.programs or {}) do
+    busy = busy or (p.status or 0) ~= 0
+  end
+  if busy then
+    local q = client:get("watering/queue")
+    queue = q and q.queue
+  end
+  local watering = apply_status(driver, device, zones.zones or {}, programs.programs or {}, restrictions, s, queue)
+  -- Watering just stopped: read the log now so Last watered is current.
+  if device:get_field(WAS_WATERING_FIELD) and not watering then
+    local ok, err = pcall(refresh_history, device, client)
+    if not ok then
+      log.warn("RainMachine watering log failed: " .. tostring(err))
+    end
+  end
+  device:set_field(WAS_WATERING_FIELD, watering)
+  return watering
 end
 
 local schedule_poll
@@ -800,21 +1099,29 @@ local function controller_for(device)
   return device
 end
 
---- Sends one command through the controller's client, then re-polls soon.
-local function send(driver, device, path, body)
+--- The controller and its API client for a command, or nil.
+local function command_client(device)
   local parent = controller_for(device)
   if not parent then
     log.error("RainMachine " .. tostring(device.label) .. " has no controller")
-    return
+    return nil
   end
   local s = get_settings(parent)
   s.ip = resolve_ip(parent, s, false)
   local problem = settings_problem(s)
   if problem then
     log.error("RainMachine command not sent: " .. problem)
+    return nil
+  end
+  return parent, get_client(parent, s)
+end
+
+--- Sends one command through the controller's client, then re-polls soon.
+local function send(driver, device, path, body)
+  local parent, client = command_client(device)
+  if not parent then
     return
   end
-  local client = get_client(parent, s)
   local data, err = client:post(path, body)
   if data then
     log.info("RainMachine " .. path .. " OK")
@@ -832,11 +1139,44 @@ local function watering_minutes(device)
   return tonumber(value) or DEFAULT_WATERING_MINUTES
 end
 
+--- The program's zones (run order) and its data, read fresh.
+local function program_and_zones(parent, client, uid)
+  local p = client:get("program/" .. uid)
+  if not p or not p.wateringTimes then
+    return nil
+  end
+  local dedicated = parent:get_field(DEDICATED_MV_FIELD) == true
+  return p, display.program_zones(p, function(zid) return dedicated and zid == 1 end)
+end
+
+--- Stops the program, including leftovers of its zones queued on their own.
+local function stop_program(driver, device, uid)
+  local parent, client = command_client(device)
+  send(driver, device, "program/" .. uid .. "/stop", { pid = uid })
+  local active = parent and parent:get_field(ACTIVE_PROGRAMS_FIELD)
+  if not (active and active[uid]) then
+    return
+  end
+  local _, zones = program_and_zones(parent, client, uid)
+  local in_program = {}
+  for _, z in ipairs(zones or {}) do
+    in_program[z.zid] = true
+  end
+  local q = client:get("watering/queue")
+  for _, e in ipairs((q and q.queue) or {}) do
+    if (not e.pid or e.pid == 0) and in_program[e.zid] then
+      send(driver, device, "zone/" .. e.zid .. "/stop", { zid = e.zid })
+    end
+  end
+end
+
 local function switch_on(driver, device, command)
   local kind, uid = child_kind(device)
   if kind == "zone" then
     send(driver, device, "zone/" .. uid .. "/start", { time = watering_minutes(device) * 60 })
   elseif kind == "program" then
+    -- The same call as Run in the RainMachine app: RainMachine decides the
+    -- times (user decision 2026-10-19: match the app).
     send(driver, device, "program/" .. uid .. "/start", { pid = uid })
   end
 end
@@ -846,7 +1186,7 @@ local function switch_off(driver, device, command)
   if kind == "zone" then
     send(driver, device, "zone/" .. uid .. "/stop", { zid = uid })
   elseif kind == "program" then
-    send(driver, device, "program/" .. uid .. "/stop", { pid = uid })
+    stop_program(driver, device, uid)
   end
 end
 
@@ -855,6 +1195,8 @@ end
 local function set_watering_time(driver, device, command)
   local minutes = math.max(1, math.min(120, math.floor(tonumber(command.args.minutes) or DEFAULT_WATERING_MINUTES)))
   device:emit_event(WATERING_TIME_CAP.wateringTime({ value = minutes, unit = "min" }))
+  -- Kept until this zone's next run ends, then it follows the program again.
+  device:set_field(WT_OVERRIDE_FIELD, true, { persist = true })
   local kind, uid = child_kind(device)
   if kind == "zone" and device:get_latest_state("main", capabilities.switch.ID, "switch") == "on" then
     log.info("RainMachine " .. tostring(device.label) .. " is on: restarting it for " .. minutes .. " min")
@@ -869,7 +1211,8 @@ local function set_rain_delay(driver, device, command)
 end
 
 local function stop_all(driver, device, command)
-  device:set_field(STOPPED_AT_FIELD, os.time())
+  -- Persisted, so a driver restart doesn't clear "Stopped by user" early.
+  device:set_field(STOPPED_AT_FIELD, os.time(), { persist = true })
   send(driver, device, "watering/stopall", { all = true })
 end
 
@@ -891,6 +1234,9 @@ local function device_init(driver, device)
     return
   end
   log.info("RainMachine controller init: " .. tostring(device.label))
+  if device:get_field(STOPPED_AT_FIELD) then
+    log.info("RainMachine Stop All was " .. (os.time() - device:get_field(STOPPED_AT_FIELD)) .. " s ago: still showing \"Stopped by user\"")
+  end
   -- Move the controller to the current layout whenever its version changes
   -- (a capability check alone misses layouts that only remove tiles).
   if device:get_field("controller_profile") ~= CONTROLLER_PROFILE

@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{exposure.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Exposure",
+   "displayType": "state",
+   "state": {
+    "label": "{{exposure.value}}"
+   }
+  }
+ ]
+}
