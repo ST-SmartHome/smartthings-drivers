@@ -707,10 +707,14 @@ local function update_forecast(device, client, force)
   end
 end
 
-local function status_text(zones, restrictions)
+local function status_text(zones, restrictions, dedicated)
   local queued = 0
   for _, z in ipairs(zones) do
-    if z.state == 1 then
+    -- RainMachine reports the master valve as watering during every run
+    -- (seen on an HD-12, forum 2026-10-19), so skip it like the zone list does.
+    if is_master_valve(z, dedicated) then
+      -- skip
+    elseif z.state == 1 then
       return "Watering " .. tostring(z.name) .. ", " .. minutes_up(z.remaining) .. " min left"
     elseif z.state == 2 then
       queued = queued + 1
@@ -959,7 +963,7 @@ local function apply_status(driver, device, zones, programs, restrictions, s, qu
 
   -- After "Stop all watering", show that it worked until watering starts
   -- again or STOPPED_SHOW_SECONDS pass (RainMachine keeps no such state).
-  local status = status_text(zones, restrictions)
+  local status = status_text(zones, restrictions, dedicated)
   local ok, program_line = pcall(display.program_status, ctx.queue, program_names, zone_names, ctx.local_now, STATUS_MAX)
   if ok and program_line then
     status = program_line

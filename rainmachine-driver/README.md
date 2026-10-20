@@ -51,6 +51,7 @@ A wrong password or IP shows the controller offline, with the reason in Irrigati
 ## Master valve
 
 The master valve never gets a device. RainMachine opens it automatically whenever a zone runs, and switching it on alone could run a pump against closed zones.
+It is also left out of the controller's Irrigation Status, so the status shows the zone that is actually watering.
 
 - **Pro-8/16:** the master valve has its own terminal (valve 1), and zones are numbered from valve 2.
 - **Mini-8 and HD:** a zone set as the master valve is left out.
