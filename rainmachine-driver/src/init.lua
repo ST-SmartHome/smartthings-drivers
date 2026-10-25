@@ -344,13 +344,9 @@ end
 ---   * cycle & soak (cs_on/cycles/soak): a zone's soak pause overlaps the
 ---     other zones' cycles, so only the uncovered part of each pause adds
 ---     time: (cycles - 1) * max(0, soak - (zones - 1) * average zone time / cycles).
---- dailystats/details wateringFlag reasons (RainMachine API docs), shortened
---- for the tile.
-local SKIP_REASONS = {
-  [1] = "Stopped", [2] = "Below Threshold", [3] = "Freeze", [4] = "Restricted Day",
-  [5] = "Restricted Day", [6] = "Water Surplus", [7] = "Rain Sensor", [8] = "Rain",
-  [9] = "Restricted Month", [10] = "Rain Delay", [11] = "Rain",
-}
+--- dailystats/details wateringFlag reasons: display.SKIP_REASONS. No flag with
+--- 0 s means RainMachine calculated no water for that day (e.g. forecast rain).
+local SKIP_REASONS = display.SKIP_REASONS
 
 local function estimated_minutes(p, date_key, pct_by_day, max_coef, details)
   local total, zones = 0, 0
@@ -369,7 +365,7 @@ local function estimated_minutes(p, date_key, pct_by_day, max_coef, details)
   local run
   if known then
     if known.seconds <= 0 then
-      return 0, SKIP_REASONS[known.flag] or "Skipped"
+      return 0, SKIP_REASONS[known.flag] or "No water needed"
     end
     run = known.seconds
   else
