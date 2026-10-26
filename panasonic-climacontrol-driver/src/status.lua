@@ -2,13 +2,11 @@
 ---
 --- Pure Lua (no SmartThings modules), so it can be tested on its own.
 ---
---- The module's status JSON (GET /control) isn't documented for the
---- Panasonic version. ProtoART's Mitsubishi version nests the air
---- conditioner under "heatpump" (power, mode, fan, set_temperature,
---- actual_temperature, ...), and the Panasonic MQTT topics use the same
---- names, so the same layout is assumed. Each reading tries a few paths and
---- the driver logs the JSON's keys once, so a different layout shows up in
---- the hub log.
+--- The module's status JSON (GET /control) isn't in ProtoART's docs; the
+--- paths below match a real Panasonic module's response (json/pana.json in
+--- the Homey app github.com/tammert/net.protoart.clima, firmware 3.4.1).
+--- Some readings also try older names, and the driver logs the JSON's keys
+--- once, so a different layout shows up in the hub log.
 
 local Status = {}
 
@@ -105,8 +103,9 @@ function Status.vane_from_device(v)
 end
 
 --- Horizontal vane: module "maxleft/0, left/1, middle/2, right/3,
---- maxright/4, swing/5". Sent by name.
-local WIDEVANE_BY_NUMBER = { ["0"] = "maxleft", ["1"] = "left", ["2"] = "middle", ["3"] = "right", ["4"] = "maxright", ["5"] = "swing" }
+--- maxright/4, swing/5". Sent by name. The status reports "auto" too, which
+--- shows as Swing (as on the vertical vane, where swing and auto are one).
+local WIDEVANE_BY_NUMBER = { ["0"] = "maxleft", ["1"] = "left", ["2"] = "middle", ["3"] = "right", ["4"] = "maxright", ["5"] = "swing", auto = "swing" }
 local WIDEVANE_NAMES = { maxleft = true, left = true, middle = true, right = true, maxright = true, swing = true }
 Status.WIDEVANE_VALUES = { "swing", "maxleft", "left", "middle", "right", "maxright" }
 
@@ -163,6 +162,8 @@ function Status.parse(data)
     mode = Status.mode_from_device(hp_mode),
     fan = Status.fan_from_device(Status.first(data, { "heatpump.fan" })),
     setpoint = Status.number(Status.first(data, { "heatpump.set_temperature", "heatpump.settemperature" })),
+    setpoint_min = Status.number(Status.first(data, { "heatpump.coolmin" })),
+    setpoint_max = Status.number(Status.first(data, { "heatpump.coolmax" })),
     room = Status.number(Status.first(data, {
       "heatpump.actual_temperature", "heatpump.room_temperature", "heatpump.roomtemperature", "heatpump.temperature",
     })),
@@ -187,6 +188,7 @@ function Status.parse(data)
     uptime = Status.number(Status.first(data, { "sys.up" })),
     mac = Status.first(data, { "wifi.mac", "module.mac" }),
     module_id = Status.first(data, { "sys.id", "module.id" }),
+    name = Status.first(data, { "sys.frname" }),
     firmware = Status.first(data, { "fw.curr", "module.fw" }),
   }
 end

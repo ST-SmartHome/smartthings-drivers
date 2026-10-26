@@ -37,10 +37,12 @@ local POLL_TIMER_FIELD = "poll_timer"
 local EMIT_CACHE_FIELD = "emit_cache"
 local LAYOUT_LOGGED_FIELD = "layout_logged"
 local LAST_FIELD = "last_status"
+local RANGE_FIELD = "setpoint_range"
 
 local COMMAND_REPOLL_SECONDS = 2
 local OFFLINE_AFTER_FAILURES = 3
 local REDISCOVER_AFTER_FAILURES = 2
+-- Setpoint range until the module reports its own (heatpump.coolmin/coolmax).
 local SETPOINT_MIN, SETPOINT_MAX = 16, 30
 
 -- ===== Settings and address =====
@@ -121,7 +123,30 @@ local function emit(device, component_id, key, event)
   end
 end
 
+--- The setpoint range: the module's, else the default.
+local function setpoint_range(device)
+  local r = device:get_field(RANGE_FIELD)
+  if r then
+    return r.min, r.max
+  end
+  return SETPOINT_MIN, SETPOINT_MAX
+end
+
+local function emit_setpoint_range(device)
+  local min, max = setpoint_range(device)
+  device:emit_event(capabilities.thermostatCoolingSetpoint.coolingSetpointRange(
+    { value = { minimum = min, maximum = max, step = 0.5 }, unit = "C" }))
+end
+
 local function apply_status(device, parsed)
+  local min, max = parsed.setpoint_min, parsed.setpoint_max
+  if min and max and min < max then
+    local old_min, old_max = setpoint_range(device)
+    device:set_field(RANGE_FIELD, { min = min, max = max }, { persist = true })
+    if min ~= old_min or max ~= old_max then
+      emit_setpoint_range(device)
+    end
+  end
   if parsed.power then
     emit(device, "main", "switch", capabilities.switch.switch(parsed.power))
   end
@@ -336,7 +361,8 @@ local function set_cooling_setpoint(driver, device, command)
   end
   -- Panasonic remotes step in 0.5 °C.
   value = math.floor(value * 2 + 0.5) / 2
-  value = math.max(SETPOINT_MIN, math.min(SETPOINT_MAX, value))
+  local min, max = setpoint_range(device)
+  value = math.max(min, math.min(max, value))
   local text = (value % 1 == 0) and string.format("%d", value) or string.format("%.1f", value)
   if send(driver, device, { { "set_temperature", text } }) then
     emit(device, "main", "setpoint", capabilities.thermostatCoolingSetpoint.coolingSetpoint({ value = value, unit = "C" }))
@@ -369,8 +395,7 @@ end
 local function emit_supported(device)
   device:emit_event(capabilities.airConditionerMode.supportedAcModes(Status.SUPPORTED_MODES))
   device:emit_event(capabilities.airConditionerFanMode.supportedAcFanModes(Status.SUPPORTED_FAN_MODES))
-  device:emit_event(capabilities.thermostatCoolingSetpoint.coolingSetpointRange(
-    { value = { minimum = SETPOINT_MIN, maximum = SETPOINT_MAX, step = 0.5 }, unit = "C" }))
+  emit_setpoint_range(device)
 end
 
 local function device_init(driver, device)
