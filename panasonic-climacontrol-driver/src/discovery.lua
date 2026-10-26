@@ -68,7 +68,7 @@ function Discovery.find_modules()
     local data, err = Api.status(ip)
     if data and type(data.heatpump) == "table" then
       local parsed = Status.parse(data)
-      table.insert(modules, { ip = ip, mac = Status.mac_key(parsed.mac), data = data })
+      table.insert(modules, { ip = ip, mac = Status.mac_key(parsed.mac), name = parsed.name, data = data })
     else
       log.debug("ClimateControl candidate " .. ip .. " is not a module: " .. tostring(err))
     end
@@ -92,7 +92,9 @@ function Discovery.discovery_handler(driver, opts, cons)
   for _, m in ipairs(modules) do
     local dni = DNI_PREFIX .. (m.mac or m.ip:gsub("%.", "-"))
     if not existing[dni] then
-      local label = "Panasonic AC " .. (m.mac and m.mac:sub(-4) or m.ip)
+      -- The name set in the module's web page (e.g. the room), if any.
+      local name = m.name and tostring(m.name):match("^%s*(.-)%s*$")
+      local label = (name and name ~= "") and name or ("Panasonic AC " .. (m.mac and m.mac:sub(-4) or m.ip))
       local ok, err = driver:try_create_device({
         type = "LAN",
         device_network_id = dni,
