@@ -4,7 +4,7 @@ SmartThings Edge driver for Panasonic air conditioners fitted with ProtoART's **
 
 The module plugs into the indoor unit's CN-CNT connector and joins your Wi-Fi. ProtoART: [product](https://lectronz.com/products/climacontrol-panasonic), [HTTP API](https://protoart.net/knowledgebase/pana_cncnt_ata_wifi_http_api_mqtt_topics/), [manual](https://protoart.net/manual).
 
-**Status: first version, not yet tested on a real module.** ProtoART's docs don't show the module's status JSON. The paths the driver reads (see [Status fields](#status-fields)) match a real Panasonic module's `/control` response (firmware 3.4.1), published as `json/pana.json` in the [Homey ClimateControl app](https://github.com/tammert/net.protoart.clima). The driver also logs the JSON's keys once at startup, so any difference on other firmware shows up in the hub log.
+**Status: first version, not yet tested on a real module.** ProtoART's docs don't show the module's status JSON. The paths the driver reads (see [Status fields](#status-fields)) match real Panasonic module `/control` responses (firmware 3.4.1): one sent by ProtoART, and `json/pana.json` in the [Homey ClimateControl app](https://github.com/tammert/net.protoart.clima). The driver also logs the JSON's keys once at startup, so any difference on other firmware shows up in the hub log.
 
 ## Device
 
@@ -21,6 +21,7 @@ One device per module (one per indoor unit):
 - **Power:** watts, when the unit reports it.
 - **Outdoor Unit** component: outdoor temperature, when the unit reports it.
 - **Eco**, **Eco Navi**, **nanoe X** and **Mild Dry** components: one switch each. Which of these work depends on the indoor unit's features.
+- **Wireless Thermometer** component: temperature, humidity and battery from ProtoART's wireless thermometer (see [Wireless thermometer](#wireless-thermometer)).
 - **Module** component (the ClimateControl module itself):
   - **Indoor Unit Link:** whether the module can talk to the air conditioner over CN-CNT, and whether its EXT port is connected;
   - **Temperature Input:** which sensor the air conditioner is using (wireless thermometer, remote temperature, or its own);
@@ -28,6 +29,14 @@ One device per module (one per indoor unit):
   - **Firmware**, with the latest version when an update is available;
   - **Uptime** (to the hour) and **Module ID**;
   - **Restart module** button.
+
+## Wireless thermometer
+
+ProtoART's optional wireless thermometer (round or E-Ink) pairs with the module by radio. With the CN-TH cable fitted, the air conditioner uses its reading in place of its own sensor.
+
+The Wireless Thermometer component appears only when the module reports the thermometer as its temperature input (`heatpump.tinp` = `wireless`) and the thermometer is reporting. The driver then moves the device to the `climacontrol-panasonic-thermometer.v1` profile (the same as the standard one plus that component). The component stays while a thermometer remains paired, even if the module falls back to another input (for example on a flat battery, which then shows). It is removed after 3 polls in a row with no thermometer paired.
+
+The Air Conditioner's own Temperature tile stays the temperature the air conditioner works from (`heatpump.actual_temperature`).
 
 Not included: the module's remote room-temperature input. It has to be resent every 5 seconds, and an Edge driver can't read other SmartThings sensors.
 
@@ -73,11 +82,13 @@ Settings:
 | Uptime, Module ID | `sys.up` (seconds), `sys.id` |
 | Mac Address (also the device network id) | `wifi.mac` |
 | Device name at discovery | `sys.frname` |
+| Wireless Thermometer | `sensor.thermometer.tact` (°C), `hact` (% humidity), `batt` (% battery); shown while `heatpump.tinp` is `wireless` |
 
 If a reading stays blank on a real module, the hub log line `status JSON layout top: … | heatpump: …` shows which keys the module actually sends.
 
 ## Files
 
+- `profiles/`: `climacontrol-panasonic.v3` (standard) and `climacontrol-panasonic-thermometer.v1` (with the Wireless Thermometer component).
 - `capabilities/`: the custom capability definitions and presentations (namespace `aboutisland47519`): Preset, Vertical Vane, Horizontal Vane, Indoor Unit Link, Temperature Input, Firmware, Uptime, Module ID, Restart Module. Wifi Signal, Ip Address and Mac Address are shared with the Big Ass Fans driver.
 
 - `src/init.lua`: device lifecycle, polling, commands.
