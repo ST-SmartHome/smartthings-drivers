@@ -3,7 +3,8 @@
 --- Pure Lua (no SmartThings modules), so it can be tested on its own.
 ---
 --- The module's status JSON (GET /control) isn't in ProtoART's docs; the
---- paths below match a real Panasonic module's response (firmware 3.4.1).
+--- paths below match a real Panasonic module's response supplied by
+--- ProtoART.
 --- Some readings also try older names, and the driver logs the JSON's keys
 --- once, so a different layout shows up in the hub log.
 
@@ -188,8 +189,19 @@ function Status.parse(data)
     mac = Status.first(data, { "wifi.mac", "module.mac" }),
     module_id = Status.first(data, { "sys.id", "module.id" }),
     name = Status.first(data, { "sys.frname" }),
+    -- ProtoART's wireless thermometer, when one is paired.
+    thermometer = type(Status.get(data, "sensor.thermometer")) == "table",
+    thermo_temp = Status.number(Status.first(data, { "sensor.thermometer.tact" })),
+    thermo_humidity = Status.number(Status.first(data, { "sensor.thermometer.hact" })),
+    thermo_battery = Status.number(Status.first(data, { "sensor.thermometer.batt" })),
     firmware = Status.first(data, { "fw.curr", "module.fw" }),
   }
+end
+
+--- True when the module's temperature input is its wireless thermometer
+--- (heatpump.tinp "wireless") and the thermometer is reporting.
+function Status.uses_wireless_thermometer(parsed)
+  return lower(parsed.temp_input) == "wireless" and parsed.thermometer and parsed.thermo_temp ~= nil
 end
 
 --- True when the status says the module can't talk to the air conditioner.

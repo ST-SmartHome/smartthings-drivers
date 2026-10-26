@@ -1,0 +1,109 @@
+name: climacontrol-panasonic-thermometer.v1
+components:
+  - id: main
+    label: "Air Conditioner"
+    capabilities:
+      - id: switch
+        version: 1
+      - id: airConditionerMode
+        version: 1
+      - id: airConditionerFanMode
+        version: 1
+      - id: thermostatCoolingSetpoint
+        version: 1
+      - id: temperatureMeasurement
+        version: 1
+      - id: aboutisland47519.preset
+        version: 1
+      - id: aboutisland47519.verticalVane
+        version: 1
+      - id: aboutisland47519.horizontalVane
+        version: 1
+      - id: powerMeter
+        version: 1
+      - id: refresh
+        version: 1
+    categories:
+      - name: AirConditioner
+  - id: outdoor
+    label: "Outdoor Unit"
+    capabilities:
+      - id: temperatureMeasurement
+        version: 1
+  - id: eco
+    label: "Eco"
+    capabilities:
+      - id: switch
+        version: 1
+  - id: econavi
+    label: "Eco Navi"
+    capabilities:
+      - id: switch
+        version: 1
+  - id: nanoex
+    label: "nanoe X"
+    capabilities:
+      - id: switch
+        version: 1
+  - id: milddry
+    label: "Mild Dry"
+    capabilities:
+      - id: switch
+        version: 1
+  - id: thermometer
+    label: "Wireless Thermometer"
+    capabilities:
+      - id: temperatureMeasurement
+        version: 1
+      - id: relativeHumidityMeasurement
+        version: 1
+      - id: battery
+        version: 1
+  - id: module
+    label: "Module"
+    capabilities:
+      - id: aboutisland47519.indoorUnitLink
+        version: 1
+      - id: aboutisland47519.temperatureInput
+        version: 1
+      - id: aboutisland47519.wifiSignal
+        version: 1
+      - id: aboutisland47519.ipAddress
+        version: 1
+      - id: aboutisland47519.macAddress
+        version: 1
+      - id: aboutisland47519.firmware
+        version: 1
+      - id: aboutisland47519.uptime
+        version: 1
+      - id: aboutisland47519.moduleId
+        version: 1
+      - id: aboutisland47519.restartModule
+        version: 1
+preferences:
+  - title: "IP Address (optional)"
+    name: ipAddress
+    description: "Leave as 0.0.0.0 to find the module automatically. Enter its IP only if it isn't found (e.g. it's on another network segment)"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      minLength: 7
+      maxLength: 15
+      default: "0.0.0.0"
+  - title: "Poll Interval (seconds)"
+    name: pollInterval
+    description: "How often to read the air conditioner's status"
+    required: true
+    preferenceType: integer
+    definition:
+      minimum: 5
+      maximum: 300
+      default: 15
+  - title: "Mode change turns the unit on"
+    name: modeTurnsOn
+    description: "Choosing a mode while the air conditioner is off also switches it on, like the remote"
+    required: true
+    preferenceType: boolean
+    definition:
+      default: true

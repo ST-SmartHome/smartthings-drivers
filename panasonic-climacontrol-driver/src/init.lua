@@ -3,7 +3,7 @@
 ---
 --- One device per module (per indoor unit): power, mode, fan speed,
 --- temperature setpoint, room temperature, outdoor temperature and power
---- use. Status is polled from GET /control; commands are
+--- use, plus the wireless thermometer's readings when the module uses one. Status is polled from GET /control; commands are
 --- /control?cmd=heatpump&<key>=<value>.
 ---
 --- API reference: https://protoart.net/knowledgebase/pana_cncnt_ata_wifi_http_api_mqtt_topics/
@@ -30,6 +30,9 @@ local MODULE_ID_CAP = capabilities["aboutisland47519.moduleId"]
 local RESTART_CAP = capabilities["aboutisland47519.restartModule"]
 
 local PROFILE = "climacontrol-panasonic.v3"
+-- The same plus a Wireless Thermometer component, used while the module's
+-- temperature input is its wireless thermometer.
+local THERMO_PROFILE = "climacontrol-panasonic-thermometer.v1"
 
 local IP_FIELD = "ip"
 local FAILURES_FIELD = "failures"
@@ -38,10 +41,14 @@ local EMIT_CACHE_FIELD = "emit_cache"
 local LAYOUT_LOGGED_FIELD = "layout_logged"
 local LAST_FIELD = "last_status"
 local RANGE_FIELD = "setpoint_range"
+local PROFILE_REQUEST_FIELD = "profile_request"
+local THERMO_ABSENT_FIELD = "thermometer_absent"
 
 local COMMAND_REPOLL_SECONDS = 2
 local OFFLINE_AFTER_FAILURES = 3
 local REDISCOVER_AFTER_FAILURES = 2
+-- Polls without a paired thermometer before its component is removed.
+local THERMO_REMOVE_AFTER_POLLS = 3
 -- Setpoint range until the module reports its own (heatpump.coolmin/coolmax).
 local SETPOINT_MIN, SETPOINT_MAX = 16, 30
 
@@ -101,6 +108,11 @@ end
 --- Emit only when the value changed since the last emit (polling every few
 --- seconds would otherwise fill the device history).
 local function emit(device, component_id, key, event)
+  local component = component_id ~= "main" and device.profile.components[component_id]
+  if component_id ~= "main" and not component then
+    -- Not in this profile (yet): don't cache, so it's sent once it is.
+    return
+  end
   local cache = device:get_field(EMIT_CACHE_FIELD) or {}
   local id = component_id .. "/" .. key
   local value = event.value
@@ -116,10 +128,52 @@ local function emit(device, component_id, key, event)
   if component_id == "main" then
     device:emit_event(event)
   else
-    local component = device.profile.components[component_id]
-    if component then
-      device:emit_component_event(component, event)
+    device:emit_component_event(component, event)
+  end
+end
+
+--- Ask for a profile once (the change arrives as infoChanged).
+local function request_profile(device, profile)
+  if device:get_field(PROFILE_REQUEST_FIELD) == profile then
+    return
+  end
+  device:set_field(PROFILE_REQUEST_FIELD, profile)
+  log.info(tostring(device.label) .. ": switching to profile " .. profile)
+  device:try_update_metadata({ profile = profile })
+end
+
+--- Wireless thermometer: its component is added when the module's
+--- temperature input is the thermometer, and removed once no thermometer
+--- has been paired for a few polls. While one stays paired the component
+--- stays too, so a flat battery still shows when the module has fallen back
+--- to another input.
+local function update_thermometer(device, parsed)
+  local has_component = device.profile.components.thermometer ~= nil
+  if Status.uses_wireless_thermometer(parsed) then
+    device:set_field(THERMO_ABSENT_FIELD, 0)
+    if not has_component then
+      request_profile(device, THERMO_PROFILE)
     end
+  elseif has_component and not parsed.thermometer then
+    local absent = (device:get_field(THERMO_ABSENT_FIELD) or 0) + 1
+    device:set_field(THERMO_ABSENT_FIELD, absent)
+    if absent >= THERMO_REMOVE_AFTER_POLLS then
+      request_profile(device, PROFILE)
+    end
+  end
+  if not has_component or not parsed.thermometer then
+    return
+  end
+  if parsed.thermo_temp then
+    emit(device, "thermometer", "temp",
+      capabilities.temperatureMeasurement.temperature({ value = parsed.thermo_temp, unit = "C" }))
+  end
+  if parsed.thermo_humidity then
+    emit(device, "thermometer", "humidity",
+      capabilities.relativeHumidityMeasurement.humidity({ value = parsed.thermo_humidity, unit = "%" }))
+  end
+  if parsed.thermo_battery then
+    emit(device, "thermometer", "battery", capabilities.battery.battery({ value = parsed.thermo_battery, unit = "%" }))
   end
 end
 
@@ -199,6 +253,7 @@ local function apply_status(device, parsed)
       emit(device, "module", tile[1], tile[2](tile[3]))
     end
   end
+  update_thermometer(device, parsed)
 end
 
 -- ===== Polling =====
@@ -404,6 +459,7 @@ local function device_init(driver, device)
     log.info(tostring(device.label) .. ": switching to profile " .. PROFILE)
     device:try_update_metadata({ profile = PROFILE })
   end
+  device:set_field(PROFILE_REQUEST_FIELD, nil)
   emit_supported(device)
   device:set_field(EMIT_CACHE_FIELD, {})
   device:set_field(LAYOUT_LOGGED_FIELD, nil)
@@ -415,6 +471,10 @@ local function device_added(driver, device)
 end
 
 local function info_changed(driver, device, event, args)
+  -- A profile change arrives here too: send every value again so the new
+  -- components fill at once.
+  device:set_field(PROFILE_REQUEST_FIELD, nil)
+  device:set_field(EMIT_CACHE_FIELD, {})
   device:set_field(FAILURES_FIELD, 0)
   schedule_poll(driver, device, 1)
 end
