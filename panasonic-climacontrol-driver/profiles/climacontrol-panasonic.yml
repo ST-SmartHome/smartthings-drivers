@@ -1,4 +1,4 @@
-name: climacontrol-panasonic.v2
+name: climacontrol-panasonic.v3
 components:
   - id: main
     label: "Air Conditioner"
@@ -49,6 +49,27 @@ components:
     label: "Mild Dry"
     capabilities:
       - id: switch
+        version: 1
+  - id: module
+    label: "Module"
+    capabilities:
+      - id: aboutisland47519.indoorUnitLink
+        version: 1
+      - id: aboutisland47519.temperatureInput
+        version: 1
+      - id: aboutisland47519.wifiSignal
+        version: 1
+      - id: aboutisland47519.ipAddress
+        version: 1
+      - id: aboutisland47519.macAddress
+        version: 1
+      - id: aboutisland47519.firmware
+        version: 1
+      - id: aboutisland47519.uptime
+        version: 1
+      - id: aboutisland47519.moduleId
+        version: 1
+      - id: aboutisland47519.restartModule
         version: 1
 preferences:
   - title: "IP Address (optional)"

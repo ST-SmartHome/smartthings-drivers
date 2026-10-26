@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{uptime.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Uptime",
+   "displayType": "state",
+   "state": {
+    "label": "{{uptime.value}}"
+   }
+  }
+ ]
+}

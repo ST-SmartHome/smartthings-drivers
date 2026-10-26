@@ -54,4 +54,13 @@ function Api.command(ip, key, value)
   return true
 end
 
+--- Restart the module (GET /control?cmd=restart).
+function Api.restart(ip)
+  local body, err = get("http://" .. ip .. "/control?cmd=restart")
+  if not body then
+    return nil, err
+  end
+  return true
+end
+
 return Api

@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Restart module",
+   "displayType": "pushButton",
+   "pushButton": {
+    "command": "push"
+   }
+  }
+ ],
+ "automation": {
+  "conditions": [],
+  "actions": []
+ }
+}
