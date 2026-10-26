@@ -1,0 +1,7 @@
+name: panasonic-climacontrol-lan
+packageKey: panasonic-climacontrol-lan
+author: BenM
+description: Panasonic air conditioners via the ProtoART ClimateControl module's local HTTP API
+permissions:
+  lan: {}
+  discovery: {}

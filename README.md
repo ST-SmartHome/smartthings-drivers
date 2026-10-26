@@ -17,6 +17,10 @@ cloud dependency once set up.
 - **[bigassfans-driver](bigassfans-driver/)** (`bigassfans-i6-lan`) —
   Big Ass Fans Haiku H/I Series ceiling fans, over their local "i6"
   protocol, mDNS auto-discovered.
+- **[panasonic-climacontrol-driver](panasonic-climacontrol-driver/)**
+  (`panasonic-climacontrol-lan`) — Panasonic air conditioners fitted with
+  ProtoART's ClimateControl module, over its local HTTP API, mDNS
+  auto-discovered. First version, not yet tested on a real module.
 
 Each has its own `README.md` (technical details, setup).
 
