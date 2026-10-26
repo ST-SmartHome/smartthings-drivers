@@ -1,0 +1,45 @@
+{
+ "name": "Preset",
+ "attributes": {
+  "preset": {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "value": {
+      "type": "string",
+      "enum": [
+       "normal",
+       "powerful",
+       "quiet"
+      ]
+     }
+    },
+    "additionalProperties": false,
+    "required": [
+     "value"
+    ]
+   },
+   "setter": "setPreset",
+   "enumCommands": []
+  }
+ },
+ "commands": {
+  "setPreset": {
+   "name": "setPreset",
+   "arguments": [
+    {
+     "name": "value",
+     "optional": false,
+     "schema": {
+      "type": "string",
+      "enum": [
+       "normal",
+       "powerful",
+       "quiet"
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

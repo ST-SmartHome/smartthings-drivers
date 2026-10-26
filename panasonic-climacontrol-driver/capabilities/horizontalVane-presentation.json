@@ -1,0 +1,149 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{vane.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Horizontal Vane",
+   "displayType": "list",
+   "list": {
+    "command": {
+     "name": "setVane",
+     "alternatives": [
+      {
+       "key": "swing",
+       "value": "Swing"
+      },
+      {
+       "key": "maxleft",
+       "value": "Far left"
+      },
+      {
+       "key": "left",
+       "value": "Left"
+      },
+      {
+       "key": "middle",
+       "value": "Centre"
+      },
+      {
+       "key": "right",
+       "value": "Right"
+      },
+      {
+       "key": "maxright",
+       "value": "Far right"
+      }
+     ]
+    },
+    "state": {
+     "value": "vane.value",
+     "alternatives": [
+      {
+       "key": "swing",
+       "value": "Swing"
+      },
+      {
+       "key": "maxleft",
+       "value": "Far left"
+      },
+      {
+       "key": "left",
+       "value": "Left"
+      },
+      {
+       "key": "middle",
+       "value": "Centre"
+      },
+      {
+       "key": "right",
+       "value": "Right"
+      },
+      {
+       "key": "maxright",
+       "value": "Far right"
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "automation": {
+  "conditions": [
+   {
+    "label": "Horizontal Vane",
+    "displayType": "list",
+    "list": {
+     "alternatives": [
+      {
+       "key": "swing",
+       "value": "Swing"
+      },
+      {
+       "key": "maxleft",
+       "value": "Far left"
+      },
+      {
+       "key": "left",
+       "value": "Left"
+      },
+      {
+       "key": "middle",
+       "value": "Centre"
+      },
+      {
+       "key": "right",
+       "value": "Right"
+      },
+      {
+       "key": "maxright",
+       "value": "Far right"
+      }
+     ],
+     "value": "vane.value"
+    }
+   }
+  ],
+  "actions": [
+   {
+    "label": "Horizontal Vane",
+    "displayType": "list",
+    "list": {
+     "alternatives": [
+      {
+       "key": "swing",
+       "value": "Swing"
+      },
+      {
+       "key": "maxleft",
+       "value": "Far left"
+      },
+      {
+       "key": "left",
+       "value": "Left"
+      },
+      {
+       "key": "middle",
+       "value": "Centre"
+      },
+      {
+       "key": "right",
+       "value": "Right"
+      },
+      {
+       "key": "maxright",
+       "value": "Far right"
+      }
+     ],
+     "command": "setVane"
+    }
+   }
+  ]
+ }
+}

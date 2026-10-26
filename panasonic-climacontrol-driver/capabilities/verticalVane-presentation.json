@@ -1,0 +1,149 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{vane.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Vertical Vane",
+   "displayType": "list",
+   "list": {
+    "command": {
+     "name": "setVane",
+     "alternatives": [
+      {
+       "key": "auto",
+       "value": "Auto"
+      },
+      {
+       "key": "1",
+       "value": "1 (top)"
+      },
+      {
+       "key": "2",
+       "value": "2"
+      },
+      {
+       "key": "3",
+       "value": "3"
+      },
+      {
+       "key": "4",
+       "value": "4"
+      },
+      {
+       "key": "5",
+       "value": "5 (bottom)"
+      }
+     ]
+    },
+    "state": {
+     "value": "vane.value",
+     "alternatives": [
+      {
+       "key": "auto",
+       "value": "Auto"
+      },
+      {
+       "key": "1",
+       "value": "1 (top)"
+      },
+      {
+       "key": "2",
+       "value": "2"
+      },
+      {
+       "key": "3",
+       "value": "3"
+      },
+      {
+       "key": "4",
+       "value": "4"
+      },
+      {
+       "key": "5",
+       "value": "5 (bottom)"
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "automation": {
+  "conditions": [
+   {
+    "label": "Vertical Vane",
+    "displayType": "list",
+    "list": {
+     "alternatives": [
+      {
+       "key": "auto",
+       "value": "Auto"
+      },
+      {
+       "key": "1",
+       "value": "1 (top)"
+      },
+      {
+       "key": "2",
+       "value": "2"
+      },
+      {
+       "key": "3",
+       "value": "3"
+      },
+      {
+       "key": "4",
+       "value": "4"
+      },
+      {
+       "key": "5",
+       "value": "5 (bottom)"
+      }
+     ],
+     "value": "vane.value"
+    }
+   }
+  ],
+  "actions": [
+   {
+    "label": "Vertical Vane",
+    "displayType": "list",
+    "list": {
+     "alternatives": [
+      {
+       "key": "auto",
+       "value": "Auto"
+      },
+      {
+       "key": "1",
+       "value": "1 (top)"
+      },
+      {
+       "key": "2",
+       "value": "2"
+      },
+      {
+       "key": "3",
+       "value": "3"
+      },
+      {
+       "key": "4",
+       "value": "4"
+      },
+      {
+       "key": "5",
+       "value": "5 (bottom)"
+      }
+     ],
+     "command": "setVane"
+    }
+   }
+  ]
+ }
+}

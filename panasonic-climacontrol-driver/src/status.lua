@@ -92,6 +92,55 @@ function Status.power_from_device(v)
   return nil
 end
 
+--- Vertical vane: module "1, 2, 3, 4, 5, swing/6, auto/6" (swing and auto
+--- are the same setting, 6).
+local VANE_FROM_DEVICE = {
+  ["1"] = "1", ["2"] = "2", ["3"] = "3", ["4"] = "4", ["5"] = "5",
+  swing = "auto", auto = "auto", ["6"] = "auto",
+}
+Status.VANE_VALUES = { "auto", "1", "2", "3", "4", "5" }
+
+function Status.vane_from_device(v)
+  return VANE_FROM_DEVICE[lower(v)]
+end
+
+--- Horizontal vane: module "maxleft/0, left/1, middle/2, right/3,
+--- maxright/4, swing/5". Sent by name.
+local WIDEVANE_BY_NUMBER = { ["0"] = "maxleft", ["1"] = "left", ["2"] = "middle", ["3"] = "right", ["4"] = "maxright", ["5"] = "swing" }
+local WIDEVANE_NAMES = { maxleft = true, left = true, middle = true, right = true, maxright = true, swing = true }
+Status.WIDEVANE_VALUES = { "swing", "maxleft", "left", "middle", "right", "maxright" }
+
+function Status.widevane_from_device(v)
+  local s = lower(v)
+  if s == nil then
+    return nil
+  end
+  if WIDEVANE_NAMES[s] then
+    return s
+  end
+  return WIDEVANE_BY_NUMBER[s]
+end
+
+--- Preset: module "normal/1, powerful/2, quiet/3".
+local PRESET_BY_NUMBER = { ["1"] = "normal", ["2"] = "powerful", ["3"] = "quiet" }
+local PRESET_NAMES = { normal = true, powerful = true, quiet = true }
+Status.PRESET_VALUES = { "normal", "powerful", "quiet" }
+
+function Status.preset_from_device(v)
+  local s = lower(v)
+  if s == nil then
+    return nil
+  end
+  if PRESET_NAMES[s] then
+    return s
+  end
+  return PRESET_BY_NUMBER[s]
+end
+
+--- On/off features ("on/1/true, off/0/false"), keyed by the command name the
+--- module uses; each is a switch in its own component of the same name.
+Status.FEATURES = { "eco", "econavi", "nanoex", "milddry" }
+
 function Status.number(v)
   local n = tonumber(v)
   if n == nil or n ~= n then
@@ -119,6 +168,16 @@ function Status.parse(data)
     })),
     outdoor = Status.number(Status.first(data, { "heatpump.op.tout", "heatpump.tout" })),
     watts = Status.number(Status.first(data, { "heatpump.op.pinp" })),
+    vane = Status.vane_from_device(Status.first(data, { "heatpump.vane" })),
+    widevane = Status.widevane_from_device(Status.first(data, { "heatpump.widevane" })),
+    preset = Status.preset_from_device(Status.first(data, { "heatpump.preset" })),
+    features = (function()
+      local f = {}
+      for _, key in ipairs(Status.FEATURES) do
+        f[key] = Status.power_from_device(Status.first(data, { "heatpump." .. key }))
+      end
+      return f
+    end)(),
     connected = Status.first(data, { "sys.conhp" }),
     mac = Status.first(data, { "wifi.mac", "module.mac" }),
     module_id = Status.first(data, { "sys.id", "module.id" }),

@@ -1,0 +1,51 @@
+{
+ "name": "Vertical Vane",
+ "attributes": {
+  "vane": {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "value": {
+      "type": "string",
+      "enum": [
+       "auto",
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     }
+    },
+    "additionalProperties": false,
+    "required": [
+     "value"
+    ]
+   },
+   "setter": "setVane",
+   "enumCommands": []
+  }
+ },
+ "commands": {
+  "setVane": {
+   "name": "setVane",
+   "arguments": [
+    {
+     "name": "value",
+     "optional": false,
+     "schema": {
+      "type": "string",
+      "enum": [
+       "auto",
+       "1",
+       "2",
+       "3",
+       "4",
+       "5"
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

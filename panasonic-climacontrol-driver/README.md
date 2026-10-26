@@ -15,10 +15,14 @@ One device per module (one per indoor unit):
 - **Fan Speed:** Auto, Quiet, Low, Medium, High, Turbo (the module's auto, silent, low, med, high, superhigh).
 - **Set Temperature:** 16–30 °C in 0.5 °C steps.
 - **Temperature:** the room temperature the module reports.
+- **Preset:** Normal, Powerful, Quiet.
+- **Vertical Vane:** Auto (swing), 1–5.
+- **Horizontal Vane:** Swing, Far left, Left, Centre, Right, Far right.
 - **Power:** watts, when the unit reports it.
 - **Outdoor Unit** component: outdoor temperature, when the unit reports it.
+- **Eco**, **Eco Navi**, **nanoe X** and **Mild Dry** components: one switch each. Which of these work depends on the indoor unit's features.
 
-Not yet included: vane and wide-vane position, Powerful/Quiet preset, Eco, Eco Navi, nanoe and Mild Dry. The module supports them, but they need custom capabilities.
+Not included: the module's remote room-temperature input. It has to be resent every 5 seconds, and an Edge driver can't read other SmartThings sensors.
 
 ## Setup
 
@@ -51,12 +55,18 @@ Settings:
 | Room temperature | `heatpump.actual_temperature`, else `room_temperature` / `roomtemperature` / `temperature` |
 | Outdoor temperature | `heatpump.op.tout`, else `heatpump.tout` |
 | Power (W) | `heatpump.op.pinp` |
+| Preset | `heatpump.preset` (`normal`, `powerful`, `quiet`, or `1`–`3`) |
+| Vertical vane | `heatpump.vane` (`1`–`5`; `swing`, `auto` or `6` show as Auto) |
+| Horizontal vane | `heatpump.widevane` (`maxleft`, `left`, `middle`, `right`, `maxright`, `swing`, or `0`–`5`) |
+| Eco, Eco Navi, nanoe X, Mild Dry | `heatpump.eco`, `econavi`, `nanoex`, `milddry` (`on`/`off`, `1`/`0`, `true`/`false`) |
 | Link to the indoor unit | `sys.conhp` (logged when false) |
 | MAC address | `wifi.mac` |
 
 If a reading stays blank on a real module, the hub log line `status JSON layout top: … | heatpump: …` shows which keys the module actually sends.
 
 ## Files
+
+- `capabilities/`: the custom capability definitions and presentations (namespace `aboutisland47519`): Preset, Vertical Vane, Horizontal Vane.
 
 - `src/init.lua`: device lifecycle, polling, commands.
 - `src/status.lua`: translation between module and SmartThings values (plain Lua, testable without a hub).
