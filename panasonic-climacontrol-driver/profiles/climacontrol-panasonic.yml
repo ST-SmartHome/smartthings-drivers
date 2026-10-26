@@ -1,0 +1,53 @@
+name: climacontrol-panasonic.v1
+components:
+  - id: main
+    label: "Air Conditioner"
+    capabilities:
+      - id: switch
+        version: 1
+      - id: airConditionerMode
+        version: 1
+      - id: airConditionerFanMode
+        version: 1
+      - id: thermostatCoolingSetpoint
+        version: 1
+      - id: temperatureMeasurement
+        version: 1
+      - id: powerMeter
+        version: 1
+      - id: refresh
+        version: 1
+    categories:
+      - name: AirConditioner
+  - id: outdoor
+    label: "Outdoor Unit"
+    capabilities:
+      - id: temperatureMeasurement
+        version: 1
+preferences:
+  - title: "IP Address (optional)"
+    name: ipAddress
+    description: "Leave as 0.0.0.0 to find the module automatically. Enter its IP only if it isn't found (e.g. it's on another network segment)"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text
+      minLength: 7
+      maxLength: 15
+      default: "0.0.0.0"
+  - title: "Poll Interval (seconds)"
+    name: pollInterval
+    description: "How often to read the air conditioner's status"
+    required: true
+    preferenceType: integer
+    definition:
+      minimum: 5
+      maximum: 300
+      default: 15
+  - title: "Mode change turns the unit on"
+    name: modeTurnsOn
+    description: "Choosing a mode while the air conditioner is off also switches it on, like the remote"
+    required: true
+    preferenceType: boolean
+    definition:
+      default: true
