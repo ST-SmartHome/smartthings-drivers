@@ -1,4 +1,4 @@
-name: climacontrol-panasonic.v1
+name: climacontrol-panasonic.v2
 components:
   - id: main
     label: "Air Conditioner"
@@ -13,6 +13,12 @@ components:
         version: 1
       - id: temperatureMeasurement
         version: 1
+      - id: aboutisland47519.preset
+        version: 1
+      - id: aboutisland47519.verticalVane
+        version: 1
+      - id: aboutisland47519.horizontalVane
+        version: 1
       - id: powerMeter
         version: 1
       - id: refresh
@@ -23,6 +29,26 @@ components:
     label: "Outdoor Unit"
     capabilities:
       - id: temperatureMeasurement
+        version: 1
+  - id: eco
+    label: "Eco"
+    capabilities:
+      - id: switch
+        version: 1
+  - id: econavi
+    label: "Eco Navi"
+    capabilities:
+      - id: switch
+        version: 1
+  - id: nanoex
+    label: "nanoe X"
+    capabilities:
+      - id: switch
+        version: 1
+  - id: milddry
+    label: "Mild Dry"
+    capabilities:
+      - id: switch
         version: 1
 preferences:
   - title: "IP Address (optional)"

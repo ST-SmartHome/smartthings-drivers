@@ -16,6 +16,12 @@ local Api = require "api"
 local Status = require "status"
 local discovery = require "discovery"
 
+local PRESET_CAP = capabilities["aboutisland47519.preset"]
+local VANE_CAP = capabilities["aboutisland47519.verticalVane"]
+local WIDEVANE_CAP = capabilities["aboutisland47519.horizontalVane"]
+
+local PROFILE = "climacontrol-panasonic.v2"
+
 local IP_FIELD = "ip"
 local FAILURES_FIELD = "failures"
 local POLL_TIMER_FIELD = "poll_timer"
@@ -129,6 +135,20 @@ local function apply_status(device, parsed)
   if parsed.outdoor then
     emit(device, "outdoor", "temp", capabilities.temperatureMeasurement.temperature({ value = parsed.outdoor, unit = "C" }))
   end
+  if parsed.preset then
+    emit(device, "main", "preset", PRESET_CAP.preset(parsed.preset))
+  end
+  if parsed.vane then
+    emit(device, "main", "vane", VANE_CAP.vane(parsed.vane))
+  end
+  if parsed.widevane then
+    emit(device, "main", "widevane", WIDEVANE_CAP.vane(parsed.widevane))
+  end
+  for key, state in pairs(parsed.features or {}) do
+    if state then
+      emit(device, key, "switch", capabilities.switch.switch(state))
+    end
+  end
 end
 
 -- ===== Polling =====
@@ -212,15 +232,42 @@ local function send(driver, device, commands)
   return true
 end
 
-local function switch_on(driver, device)
-  if send(driver, device, { { "power", "on" } }) then
-    emit(device, "main", "switch", capabilities.switch.switch("on"))
+--- The main switch is power; the eco/econavi/nanoex/milddry components'
+--- switches are those features, sent under the component's name.
+local function set_switch(driver, device, command, state)
+  local component = command.component or "main"
+  local key = component == "main" and "power" or component
+  if send(driver, device, { { key, state } }) then
+    emit(device, component, "switch", capabilities.switch.switch(state))
   end
 end
 
-local function switch_off(driver, device)
-  if send(driver, device, { { "power", "off" } }) then
-    emit(device, "main", "switch", capabilities.switch.switch("off"))
+local function switch_on(driver, device, command)
+  set_switch(driver, device, command, "on")
+end
+
+local function switch_off(driver, device, command)
+  set_switch(driver, device, command, "off")
+end
+
+local function set_preset(driver, device, command)
+  local value = command.args.value
+  if send(driver, device, { { "preset", value } }) then
+    emit(device, "main", "preset", PRESET_CAP.preset(value))
+  end
+end
+
+local function set_vane(driver, device, command)
+  local value = command.args.value
+  if send(driver, device, { { "vane", value } }) then
+    emit(device, "main", "vane", VANE_CAP.vane(value))
+  end
+end
+
+local function set_widevane(driver, device, command)
+  local value = command.args.value
+  if send(driver, device, { { "widevane", value } }) then
+    emit(device, "main", "widevane", WIDEVANE_CAP.vane(value))
   end
 end
 
@@ -286,6 +333,11 @@ local function emit_supported(device)
 end
 
 local function device_init(driver, device)
+  -- A device created with an older profile gets the current one.
+  if not device:supports_capability_by_id(VANE_CAP.ID) then
+    log.info(tostring(device.label) .. ": switching to profile " .. PROFILE)
+    device:try_update_metadata({ profile = PROFILE })
+  end
   emit_supported(device)
   device:set_field(EMIT_CACHE_FIELD, {})
   device:set_field(LAYOUT_LOGGED_FIELD, nil)
@@ -332,6 +384,15 @@ local climacontrol_driver = Driver("panasonic-climacontrol-lan", {
     },
     [capabilities.refresh.ID] = {
       [capabilities.refresh.commands.refresh.NAME] = refresh,
+    },
+    [PRESET_CAP.ID] = {
+      [PRESET_CAP.commands.setPreset.NAME] = set_preset,
+    },
+    [VANE_CAP.ID] = {
+      [VANE_CAP.commands.setVane.NAME] = set_vane,
+    },
+    [WIDEVANE_CAP.ID] = {
+      [WIDEVANE_CAP.commands.setVane.NAME] = set_widevane,
     },
   },
 })

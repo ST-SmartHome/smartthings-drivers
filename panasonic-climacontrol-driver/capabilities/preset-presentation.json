@@ -1,0 +1,101 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{preset.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Preset",
+   "displayType": "list",
+   "list": {
+    "command": {
+     "name": "setPreset",
+     "alternatives": [
+      {
+       "key": "normal",
+       "value": "Normal"
+      },
+      {
+       "key": "powerful",
+       "value": "Powerful"
+      },
+      {
+       "key": "quiet",
+       "value": "Quiet"
+      }
+     ]
+    },
+    "state": {
+     "value": "preset.value",
+     "alternatives": [
+      {
+       "key": "normal",
+       "value": "Normal"
+      },
+      {
+       "key": "powerful",
+       "value": "Powerful"
+      },
+      {
+       "key": "quiet",
+       "value": "Quiet"
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "automation": {
+  "conditions": [
+   {
+    "label": "Preset",
+    "displayType": "list",
+    "list": {
+     "alternatives": [
+      {
+       "key": "normal",
+       "value": "Normal"
+      },
+      {
+       "key": "powerful",
+       "value": "Powerful"
+      },
+      {
+       "key": "quiet",
+       "value": "Quiet"
+      }
+     ],
+     "value": "preset.value"
+    }
+   }
+  ],
+  "actions": [
+   {
+    "label": "Preset",
+    "displayType": "list",
+    "list": {
+     "alternatives": [
+      {
+       "key": "normal",
+       "value": "Normal"
+      },
+      {
+       "key": "powerful",
+       "value": "Powerful"
+      },
+      {
+       "key": "quiet",
+       "value": "Quiet"
+      }
+     ],
+     "command": "setPreset"
+    }
+   }
+  ]
+ }
+}

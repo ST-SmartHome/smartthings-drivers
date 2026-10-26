@@ -1,0 +1,51 @@
+{
+ "name": "Horizontal Vane",
+ "attributes": {
+  "vane": {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "value": {
+      "type": "string",
+      "enum": [
+       "swing",
+       "maxleft",
+       "left",
+       "middle",
+       "right",
+       "maxright"
+      ]
+     }
+    },
+    "additionalProperties": false,
+    "required": [
+     "value"
+    ]
+   },
+   "setter": "setVane",
+   "enumCommands": []
+  }
+ },
+ "commands": {
+  "setVane": {
+   "name": "setVane",
+   "arguments": [
+    {
+     "name": "value",
+     "optional": false,
+     "schema": {
+      "type": "string",
+      "enum": [
+       "swing",
+       "maxleft",
+       "left",
+       "middle",
+       "right",
+       "maxright"
+      ]
+     }
+    }
+   ]
+  }
+ }
+}
