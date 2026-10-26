@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{moduleId.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Module ID",
+   "displayType": "state",
+   "state": {
+    "label": "{{moduleId.value}}"
+   }
+  }
+ ]
+}

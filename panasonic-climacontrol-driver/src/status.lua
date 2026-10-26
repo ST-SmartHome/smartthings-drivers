@@ -179,6 +179,12 @@ function Status.parse(data)
       return f
     end)(),
     connected = Status.first(data, { "sys.conhp" }),
+    ext_connected = Status.first(data, { "sys.conext" }),
+    temp_input = Status.first(data, { "heatpump.tinp" }),
+    rssi = Status.number(Status.first(data, { "wifi.rssi" })),
+    ip = Status.first(data, { "wifi.ip" }),
+    firmware_latest = Status.first(data, { "fw.last" }),
+    uptime = Status.number(Status.first(data, { "sys.up" })),
     mac = Status.first(data, { "wifi.mac", "module.mac" }),
     module_id = Status.first(data, { "sys.id", "module.id" }),
     firmware = Status.first(data, { "fw.curr", "module.fw" }),
@@ -189,6 +195,94 @@ end
 function Status.unit_disconnected(parsed)
   local c = lower(parsed.connected)
   return c == "false" or c == "0"
+end
+
+-- ===== Module status text (the Module component's tiles) =====
+
+local function yes(v)
+  local s = lower(v)
+  return s == "true" or s == "1" or s == "on"
+end
+
+local function no(v)
+  local s = lower(v)
+  return s == "false" or s == "0" or s == "off"
+end
+
+--- "Connected" / "Not connected (check the CN-CNT cable)", plus the EXT port.
+function Status.link_text(parsed)
+  local text
+  if yes(parsed.connected) then
+    text = "Connected"
+  elseif no(parsed.connected) then
+    text = "Not connected (check the CN-CNT cable)"
+  else
+    return nil
+  end
+  if yes(parsed.ext_connected) then
+    text = text .. " · EXT port connected"
+  elseif no(parsed.ext_connected) then
+    text = text .. " · EXT port not connected"
+  end
+  return text
+end
+
+local TEMP_INPUT_TEXT = {
+  wireless = "Wireless thermometer",
+  external = "Remote temperature",
+  internal = "Air conditioner's own sensor",
+}
+
+function Status.temp_input_text(v)
+  if v == nil then
+    return nil
+  end
+  return TEMP_INPUT_TEXT[lower(v)] or tostring(v)
+end
+
+function Status.rssi_text(dbm)
+  if dbm == nil then
+    return nil
+  end
+  local quality = dbm >= -50 and "excellent" or dbm >= -60 and "good" or dbm >= -70 and "fair" or "weak"
+  return string.format("%d dBm (%s)", math.floor(dbm + 0.5), quality)
+end
+
+function Status.firmware_text(current, latest)
+  if current == nil then
+    return nil
+  end
+  current, latest = tostring(current), latest and tostring(latest)
+  if latest and latest ~= "" and latest ~= current then
+    return current .. " (update available: " .. latest .. ")"
+  elseif latest == current then
+    return current .. " (latest)"
+  end
+  return current
+end
+
+--- Uptime to the hour (the tile would otherwise change every poll):
+--- "under 1 h", "5 h", "3 d 4 h".
+function Status.uptime_text(seconds)
+  if seconds == nil then
+    return nil
+  end
+  local hours = math.floor(seconds / 3600)
+  if hours < 1 then
+    return "under 1 h"
+  elseif hours < 24 then
+    return hours .. " h"
+  end
+  return math.floor(hours / 24) .. " d " .. (hours % 24) .. " h"
+end
+
+--- MAC as AA:BB:CC:DD:EE:FF.
+function Status.mac_text(mac)
+  local key = Status.mac_key(mac)
+  if not key then
+    return mac and tostring(mac) or nil
+  end
+  return (key:gsub("(%x%x)", "%1:"):sub(1, -2))
 end
 
 --- A MAC in the form used for device network ids: upper case, no colons.

@@ -21,6 +21,13 @@ One device per module (one per indoor unit):
 - **Power:** watts, when the unit reports it.
 - **Outdoor Unit** component: outdoor temperature, when the unit reports it.
 - **Eco**, **Eco Navi**, **nanoe X** and **Mild Dry** components: one switch each. Which of these work depends on the indoor unit's features.
+- **Module** component (the ClimateControl module itself):
+  - **Indoor Unit Link:** whether the module can talk to the air conditioner over CN-CNT, and whether its EXT port is connected;
+  - **Temperature Input:** which sensor the air conditioner is using (wireless thermometer, remote temperature, or its own);
+  - **Wifi Signal** (dBm and a rating), **Ip Address**, **Mac Address**;
+  - **Firmware**, with the latest version when an update is available;
+  - **Uptime** (to the hour) and **Module ID**;
+  - **Restart module** button.
 
 Not included: the module's remote room-temperature input. It has to be resent every 5 seconds, and an Edge driver can't read other SmartThings sensors.
 
@@ -40,7 +47,7 @@ Settings:
 
 - **Discovery:** mDNS `_http._tcp` services whose name contains "heatpump", "hvac", "clima" or "factory" are checked with `GET /control`. A reply with a `heatpump` section is a module. Its MAC address becomes the device network id, so scanning again never duplicates a device, and a module that changes IP address is found again by MAC.
 - **Status:** `GET /control` every poll. A value is sent to SmartThings only when it changes.
-- **Commands:** `GET /control?cmd=heatpump&<key>=<value>`, then a status read 2 s later.
+- **Commands:** `GET /control?cmd=heatpump&<key>=<value>`, then a status read 2 s later. Restart is `GET /control?cmd=restart`, with a status read 20 s later.
 - **Offline:** after 3 failed polls in a row.
 - No authentication: ProtoART designs the module for a trusted LAN.
 
@@ -59,14 +66,18 @@ Settings:
 | Vertical vane | `heatpump.vane` (`1`–`5`; `swing`, `auto` or `6` show as Auto) |
 | Horizontal vane | `heatpump.widevane` (`maxleft`, `left`, `middle`, `right`, `maxright`, `swing`, or `0`–`5`) |
 | Eco, Eco Navi, nanoe X, Mild Dry | `heatpump.eco`, `econavi`, `nanoex`, `milddry` (`on`/`off`, `1`/`0`, `true`/`false`) |
-| Link to the indoor unit | `sys.conhp` (logged when false) |
-| MAC address | `wifi.mac` |
+| Indoor Unit Link | `sys.conhp`, `sys.conext` (`True`/`False`) |
+| Temperature Input | `heatpump.tinp` (`wireless`, `external`, `internal`) |
+| Wifi Signal, Ip Address | `wifi.rssi`, `wifi.ip` |
+| Firmware | `fw.curr`, `fw.last` |
+| Uptime, Module ID | `sys.up` (seconds), `sys.id` |
+| Mac Address (also the device network id) | `wifi.mac` |
 
 If a reading stays blank on a real module, the hub log line `status JSON layout top: … | heatpump: …` shows which keys the module actually sends.
 
 ## Files
 
-- `capabilities/`: the custom capability definitions and presentations (namespace `aboutisland47519`): Preset, Vertical Vane, Horizontal Vane.
+- `capabilities/`: the custom capability definitions and presentations (namespace `aboutisland47519`): Preset, Vertical Vane, Horizontal Vane, Indoor Unit Link, Temperature Input, Firmware, Uptime, Module ID, Restart Module. Wifi Signal, Ip Address and Mac Address are shared with the Big Ass Fans driver.
 
 - `src/init.lua`: device lifecycle, polling, commands.
 - `src/status.lua`: translation between module and SmartThings values (plain Lua, testable without a hub).

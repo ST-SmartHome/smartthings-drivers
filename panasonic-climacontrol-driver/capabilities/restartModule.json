@@ -1,0 +1,10 @@
+{
+ "name": "Restart Module",
+ "attributes": {},
+ "commands": {
+  "push": {
+   "name": "push",
+   "arguments": []
+  }
+ }
+}

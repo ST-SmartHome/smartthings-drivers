@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{temperatureInput.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Temperature Input",
+   "displayType": "state",
+   "state": {
+    "label": "{{temperatureInput.value}}"
+   }
+  }
+ ]
+}

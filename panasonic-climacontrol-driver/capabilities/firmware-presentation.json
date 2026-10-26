@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{firmware.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Firmware",
+   "displayType": "state",
+   "state": {
+    "label": "{{firmware.value}}"
+   }
+  }
+ ]
+}

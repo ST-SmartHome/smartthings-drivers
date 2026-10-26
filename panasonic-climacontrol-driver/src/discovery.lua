@@ -16,7 +16,7 @@ local mdns = require "st.mdns"
 local Api = require "api"
 local Status = require "status"
 
-local PROFILE = "climacontrol-panasonic.v2"
+local PROFILE = "climacontrol-panasonic.v3"
 local DNI_PREFIX = "climacontrol-"
 local MANUAL_DNI = DNI_PREFIX .. "manual"
 

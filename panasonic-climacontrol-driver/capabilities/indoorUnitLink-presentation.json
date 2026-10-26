@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{indoorUnitLink.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Indoor Unit Link",
+   "displayType": "state",
+   "state": {
+    "label": "{{indoorUnitLink.value}}"
+   }
+  }
+ ]
+}

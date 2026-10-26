@@ -19,8 +19,17 @@ local discovery = require "discovery"
 local PRESET_CAP = capabilities["aboutisland47519.preset"]
 local VANE_CAP = capabilities["aboutisland47519.verticalVane"]
 local WIDEVANE_CAP = capabilities["aboutisland47519.horizontalVane"]
+local LINK_CAP = capabilities["aboutisland47519.indoorUnitLink"]
+local TEMP_INPUT_CAP = capabilities["aboutisland47519.temperatureInput"]
+local WIFI_CAP = capabilities["aboutisland47519.wifiSignal"]
+local IP_CAP = capabilities["aboutisland47519.ipAddress"]
+local MAC_CAP = capabilities["aboutisland47519.macAddress"]
+local FIRMWARE_CAP = capabilities["aboutisland47519.firmware"]
+local UPTIME_CAP = capabilities["aboutisland47519.uptime"]
+local MODULE_ID_CAP = capabilities["aboutisland47519.moduleId"]
+local RESTART_CAP = capabilities["aboutisland47519.restartModule"]
 
-local PROFILE = "climacontrol-panasonic.v2"
+local PROFILE = "climacontrol-panasonic.v3"
 
 local IP_FIELD = "ip"
 local FAILURES_FIELD = "failures"
@@ -147,6 +156,22 @@ local function apply_status(device, parsed)
   for key, state in pairs(parsed.features or {}) do
     if state then
       emit(device, key, "switch", capabilities.switch.switch(state))
+    end
+  end
+  -- Module component: diagnostics from the status's sys/wifi/fw sections.
+  local module_tiles = {
+    { "link", LINK_CAP.indoorUnitLink, Status.link_text(parsed) },
+    { "tinp", TEMP_INPUT_CAP.temperatureInput, Status.temp_input_text(parsed.temp_input) },
+    { "rssi", WIFI_CAP.wifiSignal, Status.rssi_text(parsed.rssi) },
+    { "ip", IP_CAP.ipAddress, parsed.ip and tostring(parsed.ip) },
+    { "mac", MAC_CAP.macAddress, Status.mac_text(parsed.mac) },
+    { "fw", FIRMWARE_CAP.firmware, Status.firmware_text(parsed.firmware, parsed.firmware_latest) },
+    { "up", UPTIME_CAP.uptime, Status.uptime_text(parsed.uptime) },
+    { "id", MODULE_ID_CAP.moduleId, parsed.module_id and tostring(parsed.module_id) },
+  }
+  for _, tile in ipairs(module_tiles) do
+    if tile[3] then
+      emit(device, "module", tile[1], tile[2](tile[3]))
     end
   end
 end
@@ -318,6 +343,22 @@ local function set_cooling_setpoint(driver, device, command)
   end
 end
 
+local function restart_module(driver, device)
+  local ip = resolve_ip(driver, device, false)
+  if not ip then
+    log.warn(device.label .. ": restart ignored, module address unknown")
+    return
+  end
+  local ok, err = Api.restart(ip)
+  if ok then
+    log.info(device.label .. ": module restarting")
+  else
+    log.warn(device.label .. ": restart failed: " .. tostring(err))
+  end
+  -- It's back in a few seconds; read the status once it should be.
+  schedule_poll(driver, device, 20)
+end
+
 local function refresh(driver, device)
   device:set_field(EMIT_CACHE_FIELD, {})
   schedule_poll(driver, device, 0)
@@ -334,7 +375,7 @@ end
 
 local function device_init(driver, device)
   -- A device created with an older profile gets the current one.
-  if not device:supports_capability_by_id(VANE_CAP.ID) then
+  if not device:supports_capability_by_id(RESTART_CAP.ID) then
     log.info(tostring(device.label) .. ": switching to profile " .. PROFILE)
     device:try_update_metadata({ profile = PROFILE })
   end
@@ -393,6 +434,9 @@ local climacontrol_driver = Driver("panasonic-climacontrol-lan", {
     },
     [WIDEVANE_CAP.ID] = {
       [WIDEVANE_CAP.commands.setVane.NAME] = set_widevane,
+    },
+    [RESTART_CAP.ID] = {
+      [RESTART_CAP.commands.push.NAME] = restart_module,
     },
   },
 })
