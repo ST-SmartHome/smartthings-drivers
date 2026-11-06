@@ -882,10 +882,21 @@ local function apply_status(driver, device, zones, programs, restrictions, s, qu
       seen[pid] = nil
     end
   end
+  -- Zones with time to water in the queue; one queued only at 0 s is a
+  -- zone RainMachine is skipping, and its switch stays off.
+  local to_water = {}
   for _, e in ipairs(ctx.queue) do
+    local skip = display.is_skip_entry(e)
+    if e.zid and not skip then
+      to_water[e.zid] = true
+    end
     if e.pid and active[e.pid] then
       seen[e.pid] = seen[e.pid] or {}
-      seen[e.pid][e.zid] = true
+      if not skip then
+        seen[e.pid][e.zid] = true
+      elseif seen[e.pid][e.zid] ~= true then
+        seen[e.pid][e.zid] = tonumber(e.flag) or 0
+      end
     end
   end
   device:set_field(SEEN_ZONES_FIELD, seen)
@@ -902,7 +913,9 @@ local function apply_status(driver, device, zones, programs, restrictions, s, qu
     if child then
       if eligible then
         set_child_online(child, true)
-        child:emit_event(capabilities.switch.switch(z.state ~= 0 and "on" or "off"))
+        -- (An empty queue while a zone is queued means it couldn't be read.)
+        local on = z.state == 1 or (z.state == 2 and (to_water[z.uid] == true or #ctx.queue == 0))
+        child:emit_event(capabilities.switch.switch(on and "on" or "off"))
         child:emit_event(TIME_REMAINING_CAP.timeRemaining({ value = z.state == 1 and minutes_up(z.remaining) or 0, unit = "min" }))
         local ok, err = pcall(update_zone_tiles, device, child, z.uid, ctx)
         if not ok then

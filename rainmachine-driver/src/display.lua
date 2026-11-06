@@ -110,9 +110,9 @@ end
 
 -- dailystats/details wateringFlag, shortened for the tiles.
 M.SKIP_REASONS = {
-  [1] = "Stopped", [2] = "Below Threshold", [3] = "Freeze", [4] = "Restricted Day",
+  [1] = "Stopped", [2] = "Minimum Watering Time", [3] = "Freeze", [4] = "Restricted Day",
   [5] = "Restricted Day", [6] = "Water Surplus", [7] = "Rain Sensor", [8] = "Rain",
-  [9] = "Restricted Month", [10] = "Rain Delay", [11] = "Rain",
+  [9] = "Restricted Month", [10] = "Rain Delay", [11] = "Rain", [12] = "Adaptive Frequency",
 }
 
 -- zone/properties codes, as RainMachine's apps name them (web UI
@@ -207,6 +207,16 @@ local function skip_text(flag)
   return "skipped:" .. NBSP .. (M.SKIP_REASONS[flag] or "no water needed")
 end
 
+--- A queue entry RainMachine will skip: queued with no time to water (it
+--- stays in the queue at 0 s, flagged, until its turn passes).
+function M.is_skip_entry(e)
+  if e.running then
+    return false
+  end
+  local secs = tonumber(e.machineDuration) or tonumber(e.remaining) or 0
+  return secs <= 0
+end
+
 --- Queue entries for a program, grouped by zone: {running, seconds left in
 --- all its cycles, first entry, start offset}. ahead counts every entry in
 --- the whole queue before this zone's first one (other programs and zones
@@ -215,12 +225,20 @@ local function queue_by_zone(queue, pid, delay)
   local by_zid, ahead, seen_pid = {}, 0, false
   for _, e in ipairs(queue or {}) do
     local remaining = tonumber(e.remaining) or 0
-    if e.pid == pid and e.zid then
+    if e.pid == pid and e.zid and M.is_skip_entry(e) then
+      -- Skipped by RainMachine: not part of the run's timing.
+      local g = by_zid[e.zid]
+      if not g then
+        g = { seconds = 0, offset = ahead, skip = true, flag = tonumber(e.flag) }
+        by_zid[e.zid] = g
+      end
+      remaining = 0
+    elseif e.pid == pid and e.zid then
       if seen_pid and delay > 0 then
         ahead = ahead + delay
       end
       local g = by_zid[e.zid]
-      if not g then
+      if not g or g.skip then
         g = { seconds = 0, offset = ahead, cycle = tonumber(e.cycle), cycles = tonumber(e.cycles) }
         by_zid[e.zid] = g
       end
@@ -292,8 +310,10 @@ end
 
 --- Slot texts for a program device, in display order.
 --- ctx: {queue, local_now, details, pct_by_day, max_coef, seen}. seen[pid]
---- is the set of zones that have been in the queue during this run: a zone
---- no longer queued is done if it was seen, skipped if it never was.
+--- holds the zones that have been in the queue during this run: true for
+--- one queued to water, its skip flag (a number) for one RainMachine queued
+--- at 0 s. A zone no longer queued is done if it was seen to water, skipped
+--- if it was seen at 0 s or never seen.
 function M.program_slots(p, zones, ctx)
   local delay = (p.delay_on and tonumber(p.delay)) or 0
   local groups = queue_by_zone(ctx.queue, p.uid, delay)
@@ -313,9 +333,14 @@ function M.program_slots(p, zones, ctx)
     local done, active, skipped = {}, {}, {}
     for i, z in ipairs(zones) do
       local g = groups[z.zid]
-      if g then
+      local s = seen[z.zid]
+      if g and g.skip then
+        skipped[#skipped + 1] = z.name .. " " .. skip_text(g.flag)
+      elseif g then
         active[#active + 1] = { z = z, g = g }
-      elseif seen[z.zid] or i < first_pos then
+      elseif type(s) == "number" then
+        skipped[#skipped + 1] = z.name .. " " .. skip_text(s)
+      elseif s or i < first_pos then
         done[#done + 1] = M.ICON_DONE .. " " .. z.name .. " done"
       else
         skipped[#skipped + 1] = z.name .. " skipped"
