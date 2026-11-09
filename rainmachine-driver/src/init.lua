@@ -82,6 +82,12 @@ local EMIT_CACHE_FIELD = "emit_cache"
 local ACTIVE_PROGRAMS_FIELD = "active_programs"
 local SEEN_ZONES_FIELD = "seen_zones"
 local WT_OVERRIDE_FIELD = "watering_time_override"
+-- When the driver last started this zone (os.time). A Watering Time that
+-- arrives soon after still applies to that run: a routine sends "on" and
+-- "Watering Time" as separate commands, often with "on" first, before a poll
+-- has shown the zone as on.
+local STARTED_AT_FIELD = "started_at"
+local START_WINDOW_SECONDS = 60
 local LAST_STATE_FIELD = "last_zone_state"
 local PROFILE_TRY_FIELD = "profile_switch_tried"
 local PROFILE_RETRY_SECONDS = 120
@@ -812,6 +818,9 @@ end
 local function sync_watering_time(child, z, program_minutes)
   local last = child:get_field(LAST_STATE_FIELD)
   child:set_field(LAST_STATE_FIELD, z.state)
+  if last and last ~= 0 and z.state == 0 then
+    child:set_field(STARTED_AT_FIELD, nil)   -- the run is over: a new time doesn't restart it
+  end
   if child:get_field(WT_OVERRIDE_FIELD) then
     if last and last ~= 0 and z.state == 0 then
       child:set_field(WT_OVERRIDE_FIELD, nil, { persist = true })
@@ -1197,6 +1206,7 @@ end
 local function switch_on(driver, device, command)
   local kind, uid = child_kind(device)
   if kind == "zone" then
+    device:set_field(STARTED_AT_FIELD, os.time())
     send(driver, device, "zone/" .. uid .. "/start", { time = watering_minutes(device) * 60 })
   elseif kind == "program" then
     -- The same call as Run in the RainMachine app: RainMachine decides the
@@ -1208,6 +1218,7 @@ end
 local function switch_off(driver, device, command)
   local kind, uid = child_kind(device)
   if kind == "zone" then
+    device:set_field(STARTED_AT_FIELD, nil)
     send(driver, device, "zone/" .. uid .. "/stop", { zid = uid })
   elseif kind == "program" then
     send(driver, device, "program/" .. uid .. "/stop", { pid = uid })
@@ -1224,8 +1235,11 @@ local function set_watering_time(driver, device, command)
   -- Kept until this zone's next run ends, then it follows the program again.
   device:set_field(WT_OVERRIDE_FIELD, true, { persist = true })
   local kind, uid = child_kind(device)
-  if kind == "zone" and device:get_latest_state("main", capabilities.switch.ID, "switch") == "on" then
-    log.info("RainMachine " .. tostring(device.label) .. " is on: changing this run to " .. minutes .. " min")
+  local started_at = device:get_field(STARTED_AT_FIELD)
+  local just_started = started_at ~= nil and os.time() - started_at <= START_WINDOW_SECONDS
+  if kind == "zone" and (just_started or device:get_latest_state("main", capabilities.switch.ID, "switch") == "on") then
+    log.info("RainMachine " .. tostring(device.label) .. (just_started and " was just started" or " is on")
+      .. ": changing this run to " .. minutes .. " min")
     send(driver, device, "zone/" .. uid .. "/start", { time = minutes * 60 })
   end
 end
@@ -1255,6 +1269,9 @@ end
 local function stop_all(driver, device, command)
   -- Persisted, so a driver restart doesn't clear "Stopped by user" early.
   device:set_field(STOPPED_AT_FIELD, os.time(), { persist = true })
+  for _, child in pairs(children_of(driver, device)) do
+    child:set_field(STARTED_AT_FIELD, nil)
+  end
   send(driver, device, "watering/stopall", { all = true })
 end
 

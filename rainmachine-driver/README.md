@@ -14,7 +14,7 @@ Community thread: https://community.smartthings.com/t/st-edge-rainmachine-lan-dr
   - Rain Delay (0–14 days);
   - **Pause Watering** (15 min, 30 min, 1 h or 2 h, or Not paused to resume). Like Pause in the RainMachine app: running zones wait and carry on where they stopped. A pause started in the RainMachine app shows here too, as "Paused until 16:45";
   - Stop All Watering.
-- **Zone N: <name>**, one per active zone. The switch waters for the zone's **Watering Time** (1–120 min). Changing it while the zone runs changes that run in place, like the zone's slider in the RainMachine app.
+- **Zone N: <name>**, one per active zone. The switch waters for the zone's **Watering Time** (1–120 min). Changing it while the zone runs changes that run in place, like the zone's slider in the RainMachine app. A routine that turns a zone on and sets its Watering Time gets the new time, whichever command arrives first.
   - Watering Time follows the zone's weather-adjusted time for its next scheduled run. A time you set yourself is kept until that zone's next run ends.
   - Tiles:
     - Time Remaining;
