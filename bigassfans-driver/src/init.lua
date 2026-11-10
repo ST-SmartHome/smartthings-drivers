@@ -1566,7 +1566,10 @@ end
 -- manually (stop, verify stopped, then flip) via the standalone fix
 -- script when that incident was caught. That manual sequence is now
 -- built into the handler instead of relying on doing it by hand again.
-local MAX_STOP_ATTEMPTS = 3
+-- One table, because this file is at Lua's limit of 200 locals per chunk.
+-- Each direction request takes a new token; an older stop/verify/commit chain
+-- that finds a newer token gives up, so the last tap decides the direction.
+local DIRECTION = { MAX_STOP_ATTEMPTS = 3, TOKEN_FIELD = "direction_change_token" }
 
 --- Re-queries FAN and, once confirmed stopped (fan_mode OFF and speed 0),
 --- commits reverse_enable and hands off to the normal verify_commit path.
@@ -1575,9 +1578,21 @@ local MAX_STOP_ATTEMPTS = 3
 --- immediately (unlike reverse_enable/whoosh_enable), so this shouldn't
 --- need more than one or two rounds in practice. Wrapped in pcall for the
 --- same reason as verify_commit -- runs from a scheduled callback.
-local function verify_stopped_then_set_direction(driver, device, ip, target_reverse, attempt)
+local function verify_stopped_then_set_direction(driver, device, ip, target_reverse, attempt, token)
+  local function superseded()
+    return device:get_field(DIRECTION.TOKEN_FIELD) ~= token
+  end
   local ok, err = pcall(function()
+    if superseded() then
+      log.info("BAF direction change superseded by a newer request, abandoning this one")
+      return
+    end
     local results, query_err = BafClient.query_multi(ip, { "FAN" }, 5)
+    -- The query yields, so a newer tap can arrive during it.
+    if superseded() then
+      log.info("BAF direction change superseded during its status query, abandoning this one")
+      return
+    end
     local fan = results and results["FAN"]
     if fan and fan.fan_mode == baf.OFF_ON_AUTO.OFF and fan.speed == 0 then
       apply_fan_status(device, fan)
@@ -1592,12 +1607,12 @@ local function verify_stopped_then_set_direction(driver, device, ip, target_reve
       end)
       return
     end
-    if attempt < MAX_STOP_ATTEMPTS then
+    if attempt < DIRECTION.MAX_STOP_ATTEMPTS then
       log.warn("BAF fan not yet confirmed stopped before direction change (attempt " ..
         attempt .. "), resending stop: " .. tostring(query_err))
       BafClient.commit(ip, { fan_mode = baf.OFF_ON_AUTO.OFF }, 5)
       device.thread:call_with_delay(REFRESH_DELAY_SECONDS, function()
-        verify_stopped_then_set_direction(driver, device, ip, target_reverse, attempt + 1)
+        verify_stopped_then_set_direction(driver, device, ip, target_reverse, attempt + 1, token)
       end)
     else
       log.error("BAF fan did not confirm stopped after " .. attempt ..
@@ -1617,13 +1632,15 @@ local function set_direction(driver, device, command)
     return
   end
   local target_reverse = command.args.direction == "Reverse"
+  local token = (device:get_field(DIRECTION.TOKEN_FIELD) or 0) + 1
+  device:set_field(DIRECTION.TOKEN_FIELD, token)
   local stopped, err = BafClient.commit(ip, { fan_mode = baf.OFF_ON_AUTO.OFF }, 5)
   if not stopped then
     log.error("BAF direction-change stop commit failed: " .. tostring(err))
     return
   end
   device.thread:call_with_delay(REFRESH_DELAY_SECONDS, function()
-    verify_stopped_then_set_direction(driver, device, ip, target_reverse, 1)
+    verify_stopped_then_set_direction(driver, device, ip, target_reverse, 1, token)
   end)
 end
 

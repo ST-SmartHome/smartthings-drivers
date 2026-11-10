@@ -13,6 +13,7 @@ local pb = require "protobuf"
 local log = require "log"
 
 local BAF_PORT = 31415
+local BURST_IDLE_TIMEOUT = 1 -- seconds between frames that ends a query's read
 local MAX_FRAME_BYTES = 8192 -- safety cap against a runaway/garbled stream
 
 local BafClient = {}
@@ -165,7 +166,9 @@ function BafClient.query_multi(ip, category_names, timeout_sec)
   -- always read up to a generous frame budget and let a genuine
   -- end-of-burst (read_slip_frame returning nil on timeout) be the only
   -- early exit -- cheap in practice since a real burst is normally over
-  -- in well under a second and an actually-idle socket times out fast.
+  -- in well under a second. The caller's timeout only covers the wait for
+  -- the first frame; after it, BURST_IDLE_TIMEOUT ends the read promptly
+  -- instead of every poll sitting out the full timeout.
   local satisfied = {}
   local satisfied_count = 0
   local total_wanted = #category_names
@@ -175,6 +178,7 @@ function BafClient.query_multi(ip, category_names, timeout_sec)
     if not frame then
       break -- out of frames or timed out -- stop, evaluate what we got
     end
+    sock:settimeout(BURST_IDLE_TIMEOUT)
     -- slip.decode / parse_frame_fields->pb.parse_fields can throw a raw
     -- Lua error on a malformed/truncated frame (slip.lua's explicit
     -- "invalid emulation prevention sequence", or a nil-arithmetic error
@@ -326,9 +330,13 @@ function BafClient.commit_and_verify_more(ip, props, timeout_sec)
     if not frame then
       break
     end
-    local payload = slip.decode(frame)
-    local result = baf.parse_category_result(payload, "MORE_PUSH")
-    if result then
+    -- Same as query_multi: a corrupt frame is skipped, not thrown past close().
+    local parsed, result = pcall(function()
+      return baf.parse_category_result(slip.decode(frame), "MORE_PUSH")
+    end)
+    if not parsed then
+      log.warn("BAF commit_and_verify_more: dropping malformed frame: " .. tostring(result))
+    elseif result then
       for name in pairs(props) do
         if result[name] ~= nil then
           verified[name] = result[name]
@@ -377,9 +385,12 @@ function BafClient.query_schedules(ip, timeout_sec)
     if not frame then
       break
     end
-    local payload = slip.decode(frame)
-    local sched = baf.parse_schedule_frame(payload)
-    if sched then
+    local parsed, sched = pcall(function()
+      return baf.parse_schedule_frame(slip.decode(frame))
+    end)
+    if not parsed then
+      log.warn("BAF query_schedules: dropping malformed frame: " .. tostring(sched))
+    elseif sched then
       table.insert(schedules, sched)
     end
   end

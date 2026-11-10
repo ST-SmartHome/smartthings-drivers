@@ -36,6 +36,7 @@ local THERMO_PROFILE = "climacontrol-panasonic-thermometer.v1"
 
 local IP_FIELD = "ip"
 local FAILURES_FIELD = "failures"
+local OFFLINE_FIELD = "marked_offline"
 local POLL_TIMER_FIELD = "poll_timer"
 local EMIT_CACHE_FIELD = "emit_cache"
 local LAYOUT_LOGGED_FIELD = "layout_logged"
@@ -291,15 +292,19 @@ local function poll(driver, device)
     log.error(device.label .. ": poll error: " .. tostring(result))
   end
   if ok and result then
-    if (device:get_field(FAILURES_FIELD) or 0) >= OFFLINE_AFTER_FAILURES then
+    -- Its own field: Settings changes reset the failure count. nil (just after
+    -- a driver restart) also calls online().
+    if device:get_field(OFFLINE_FIELD) ~= false then
       device:online()
+      device:set_field(OFFLINE_FIELD, false)
     end
     device:set_field(FAILURES_FIELD, 0)
   else
     local failures = (device:get_field(FAILURES_FIELD) or 0) + 1
     device:set_field(FAILURES_FIELD, failures)
-    if failures == OFFLINE_AFTER_FAILURES then
+    if failures >= OFFLINE_AFTER_FAILURES and device:get_field(OFFLINE_FIELD) ~= true then
       device:offline()
+      device:set_field(OFFLINE_FIELD, true)
     end
   end
   schedule_poll(driver, device, get_settings(device).poll_interval)

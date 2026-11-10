@@ -534,7 +534,8 @@ function M.zone_next_text(zid, plans, local_now)
   for _, plan in ipairs(plans) do
     for _, item in ipairs(plan.items) do
       if item.zid == zid then
-        local t = item.start or plan.first
+        -- No start time (sunrise/sunset programs): last in that day's order.
+        local t = item.start or plan.first or (plan.day and plan.day + 86399)
         if t and (not best or t < best.t) then
           best = { t = t, item = item, exact = item.start ~= nil }
         end

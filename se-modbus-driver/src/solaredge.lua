@@ -109,6 +109,16 @@ local function scaled_unsigned16(regs, value_offset, sf_offset)
   return Modbus.apply_scale_factor(regs[value_offset], regs[sf_offset])
 end
 
+--- A meter phase voltage, or 0 for SunSpec's "not implemented" values: scaled,
+--- those would look like real voltages (0x8000 at SF -2 is 327.68 V).
+local function phase_voltage(regs, value_offset, sf_offset)
+  local raw = regs[value_offset]
+  if raw == 0x8000 or raw == 0xFFFF then
+    return 0
+  end
+  return scaled_unsigned16(regs, value_offset, sf_offset)
+end
+
 local function scaled_u32(regs, hi_offset, lo_offset, sf_offset)
   return Modbus.apply_scale_factor(Modbus.registers_to_u32(regs[hi_offset], regs[lo_offset]), regs[sf_offset])
 end
@@ -290,9 +300,9 @@ function SolarEdge.read(ip, port, unit_id, timeout_sec)
   local grid_power_w, grid_exported_wh, grid_imported_wh = nil, nil, nil
   local grid_phases, grid_phase_one = nil, nil
   if meter_regs then
-    local va = scaled_unsigned16(meter_regs, METER_OFFSET.PHV_A, METER_OFFSET.V_SF)
-    local vb = scaled_unsigned16(meter_regs, METER_OFFSET.PHV_B, METER_OFFSET.V_SF)
-    local vc = scaled_unsigned16(meter_regs, METER_OFFSET.PHV_C, METER_OFFSET.V_SF)
+    local va = phase_voltage(meter_regs, METER_OFFSET.PHV_A, METER_OFFSET.V_SF)
+    local vb = phase_voltage(meter_regs, METER_OFFSET.PHV_B, METER_OFFSET.V_SF)
+    local vc = phase_voltage(meter_regs, METER_OFFSET.PHV_C, METER_OFFSET.V_SF)
     if vb > THREE_PHASE_MIN_V and vc > THREE_PHASE_MIN_V and vb < 1000 and vc < 1000 then
       grid_phases = {
         power = {

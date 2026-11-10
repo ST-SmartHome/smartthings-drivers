@@ -875,7 +875,11 @@ local function switch_off(driver, device, command)
 end
 
 local function set_fan_speed(driver, device, command)
-  local speed = math.max(1, math.min(5, math.floor(command.args.speed)))
+  if math.floor(command.args.speed) <= 0 then
+    send_dp(driver, device, {["1"] = false}, true)
+    return
+  end
+  local speed = math.min(5, math.floor(command.args.speed))
   send_dp(driver, device, {["3"] = speed}, true)
 end
 

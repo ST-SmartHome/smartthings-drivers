@@ -9,6 +9,9 @@ local log = require "log"
 local Modbus = {}
 Modbus.__index = Modbus
 
+-- Replies to an earlier request that timed out can still be on the socket.
+local MAX_STALE_REPLIES = 3
+
 local function u16(hi, lo)
   return (hi << 8) | lo
 end
@@ -49,18 +52,29 @@ function Modbus:read_holding_registers(start_addr, quantity)
     return nil, "send failed: " .. tostring(send_err)
   end
 
-  local header, header_err = self.sock:receive(7)
-  if not header then
-    return nil, "header receive failed: " .. tostring(header_err)
-  end
-  local resp_tid, proto_id, length, unit_id = string.unpack(">HHHB", header)
-  if proto_id ~= 0x0000 then
-    return nil, "unexpected protocol id: " .. tostring(proto_id)
-  end
+  local pdu
+  for _ = 0, MAX_STALE_REPLIES do
+    local header, header_err = self.sock:receive(7)
+    if not header then
+      return nil, "header receive failed: " .. tostring(header_err)
+    end
+    local resp_tid, proto_id, length = string.unpack(">HHHB", header)
+    if proto_id ~= 0x0000 then
+      return nil, "unexpected protocol id: " .. tostring(proto_id)
+    end
 
-  local pdu, pdu_err = self.sock:receive(length - 1)
+    local body, pdu_err = self.sock:receive(length - 1)
+    if not body then
+      return nil, "pdu receive failed: " .. tostring(pdu_err)
+    end
+    if resp_tid == self.tid then
+      pdu = body
+      break
+    end
+    log.warn(string.format("Modbus: dropping late reply to request %d (waiting for %d)", resp_tid, self.tid))
+  end
   if not pdu then
-    return nil, "pdu receive failed: " .. tostring(pdu_err)
+    return nil, "no Modbus reply matched request " .. tostring(self.tid)
   end
 
   local func_code = string.byte(pdu, 1)
@@ -87,6 +101,10 @@ function Modbus:read_holding_registers(start_addr, quantity)
   if #pdu ~= 2 + byte_count then
     return nil, "Modbus response byte_count (" .. tostring(byte_count) ..
       ") doesn't match actual received PDU length (" .. tostring(#pdu - 2) .. " data bytes)"
+  end
+  if byte_count ~= quantity * 2 then
+    return nil, "Modbus response has " .. tostring(byte_count / 2) ..
+      " registers, requested " .. tostring(quantity)
   end
   local registers = {}
   for i = 1, byte_count / 2 do

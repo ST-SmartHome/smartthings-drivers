@@ -839,7 +839,12 @@ local function sync_watering_time(child, z, program_minutes)
 end
 
 local function apply_status(driver, device, zones, programs, restrictions, s, queue)
-  local dedicated = device:get_field(DEDICATED_MV_FIELD) == true
+  local dedicated_known = device:get_field(DEDICATED_MV_FIELD)
+  local dedicated = dedicated_known == true
+  -- Only a Pro (hwVer 5) has the dedicated terminal. Until a Pro's answer is
+  -- in, valve 1 could be the master valve, so no new zone devices are made.
+  local hw = device:get_field(HW_VER_FIELD)
+  local layout_known = dedicated_known ~= nil or (hw ~= nil and hw ~= 5)
   local existing = children_of(driver, device)
   local seen = {}
   local watering = false
@@ -860,7 +865,7 @@ local function apply_status(driver, device, zones, programs, restrictions, s, qu
     max_coef = device:get_field(MAX_COEF_FIELD),
     plans = {},
   }
-  local program_names, zone_lists, zone_sets = {}, {}, {}
+  local program_names, zone_lists, zone_sets, set_entries = {}, {}, {}, {}
   for _, p in ipairs(programs) do
     program_names[p.uid] = tostring(p.name)
     zone_lists[p.uid] = display.program_zones(p, is_master)
@@ -868,27 +873,25 @@ local function apply_status(driver, device, zones, programs, restrictions, s, qu
     for _, z in ipairs(zone_lists[p.uid]) do
       zone_sets[p.uid][z.zid] = true
     end
+    local items = display.next_run_plan(p, zone_lists[p.uid], ctx.details, ctx.pct_by_day, ctx.max_coef)
+    set_entries[#set_entries + 1] = { p = p, zones = zone_lists[p.uid], items = items }
     if p.active ~= false then
       table.insert(ctx.plans, {
         first = display.program_next_start(p),
-        items = display.next_run_plan(p, zone_lists[p.uid], ctx.details, ctx.pct_by_day, ctx.max_coef),
+        day = display.civil(p.nextRun),
+        items = items,
       })
     end
-  end
-  local set_entries = {}
-  for _, p in ipairs(programs) do
-    set_entries[#set_entries + 1] = { p = p, zones = zone_lists[p.uid],
-      items = display.next_run_plan(p, zone_lists[p.uid], ctx.details, ctx.pct_by_day, ctx.max_coef) }
   end
   -- Leftovers of a program's zones belong to it; remember which zones each
   -- running program has had in the queue (done vs skipped).
   local active
   ctx.queue, active = display.adopt(ctx.queue, zone_sets, device:get_field(ACTIVE_PROGRAMS_FIELD))
   device:set_field(ACTIVE_PROGRAMS_FIELD, active)
-  local seen = device:get_field(SEEN_ZONES_FIELD) or {}
-  for pid in pairs(seen) do
+  local program_seen = device:get_field(SEEN_ZONES_FIELD) or {}
+  for pid in pairs(program_seen) do
     if not active[pid] then
-      seen[pid] = nil
+      program_seen[pid] = nil
     end
   end
   -- Zones with time to water in the queue; one queued only at 0 s is a
@@ -900,16 +903,16 @@ local function apply_status(driver, device, zones, programs, restrictions, s, qu
       to_water[e.zid] = true
     end
     if e.pid and active[e.pid] then
-      seen[e.pid] = seen[e.pid] or {}
+      program_seen[e.pid] = program_seen[e.pid] or {}
       if not skip then
-        seen[e.pid][e.zid] = true
-      elseif seen[e.pid][e.zid] ~= true then
-        seen[e.pid][e.zid] = tonumber(e.flag) or 0
+        program_seen[e.pid][e.zid] = true
+      elseif program_seen[e.pid][e.zid] ~= true then
+        program_seen[e.pid][e.zid] = tonumber(e.flag) or 0
       end
     end
   end
-  device:set_field(SEEN_ZONES_FIELD, seen)
-  ctx.seen = seen
+  device:set_field(SEEN_ZONES_FIELD, program_seen)
+  ctx.seen = program_seen
 
   for _, z in ipairs(zones) do
     if z.state ~= 0 then
@@ -937,7 +940,7 @@ local function apply_status(driver, device, zones, programs, restrictions, s, qu
       else
         set_child_online(child, false, z.active ~= false and "zone is now the master valve; RainMachine opens it automatically" or "zone is inactive in RainMachine")
       end
-    elseif eligible then
+    elseif eligible and layout_known then
       request_child(driver, device, "zone", z.uid, zone_label(z, dedicated), ZONE_PROFILE)
     end
   end

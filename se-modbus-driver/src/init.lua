@@ -12,9 +12,16 @@ local THREE_PHASE_FIELD = "three_phase"
 local BATTERY_SEEN_FIELD = "battery_seen_polls"
 local BATTERY_MISSING_FIELD = "battery_missing_polls"
 local BATTERY_CONFIRM_POLLS = 3
+local PHASES_SEEN_FIELD = "phases_seen_polls"
+local PHASES_CONFIRM_POLLS = 3
+local APPLIED_PROFILE_FIELD = "applied_profile"
+local FAILURES_FIELD = "consecutive_poll_failures"
+local OFFLINE_FIELD = "marked_offline"
+local OFFLINE_AFTER_FAILURES = 3
 local BATTERY_GONE_POLLS = 60
 -- Profile per detected hardware. Non-battery single-phase installs stay
--- on CURRENT_PROFILE. Three-phase is persisted and only ever switches ON.
+-- on CURRENT_PROFILE. Three-phase needs 3 polls in a row, is persisted and
+-- only ever switches ON.
 -- The battery needs 3 polls in a row to switch on and 60 polls in a row
 -- without one to switch off again, so it can't oscillate.
 local CURRENT_PROFILE = "solaredge-inverter.v8"
@@ -72,6 +79,26 @@ end
 --- next scheduled one for the same device -- a real problem here since
 --- the inverter's own Modbus stack only accepts one TCP connection at a
 --- time (confirmed via the vendor's technical note, see solaredge.lua).
+local function record_poll_failure(device)
+  local failures = (device:get_field(FAILURES_FIELD) or 0) + 1
+  device:set_field(FAILURES_FIELD, failures)
+  if failures >= OFFLINE_AFTER_FAILURES and device:get_field(OFFLINE_FIELD) ~= true then
+    device:offline()
+    device:set_field(OFFLINE_FIELD, true)
+    log.warn("SolarEdge device offline after " .. failures .. " failed polls")
+  end
+end
+
+-- nil (just after a driver restart) also calls online(), since the platform
+-- may still have the device offline from before the restart.
+local function record_poll_success(device)
+  device:set_field(FAILURES_FIELD, 0)
+  if device:get_field(OFFLINE_FIELD) ~= false then
+    device:online()
+    device:set_field(OFFLINE_FIELD, false)
+  end
+end
+
 local function poll_once(driver, device)
   if device:get_field(POLL_IN_PROGRESS_FIELD) then
     log.info("SolarEdge poll already in progress for this device, skipping overlapping call")
@@ -89,8 +116,10 @@ local function poll_once(driver, device)
     if not reading then
       log.error(string.format("SolarEdge poll failed (%s:%d unit %d): %s",
         settings.ip, settings.port, settings.unit_id, tostring(read_err)))
+      record_poll_failure(device)
       return
     end
+    record_poll_success(device)
 
     local temp_display = reading.temp_c and string.format("%.1fC", reading.temp_c) or "n/a"
     log.info(string.format("SolarEdge reading: %.1fW, %.1fWh lifetime, %.1fV DC, %.1fW DC, %s, status=%s",
@@ -144,6 +173,16 @@ local function poll_once(driver, device)
     -- the profile once, same pattern as the battery below.
     local ph = reading.grid_phases
     local one = reading.grid_phase_one
+    if not device:get_field(THREE_PHASE_FIELD) then
+      local seen = ph and (device:get_field(PHASES_SEEN_FIELD) or 0) + 1 or 0
+      device:set_field(PHASES_SEEN_FIELD, seen)
+      if seen < PHASES_CONFIRM_POLLS then
+        if ph then
+          log.info(string.format("SolarEdge: three phases read, confirming %d/%d", seen, PHASES_CONFIRM_POLLS))
+        end
+        ph = nil
+      end
+    end
     if not ph and one and grid and device:supports_capability(PHASE_CAPS[1], "grid") then
       -- Single phase: the one row shows L1's voltage and current too.
       device:emit_component_event(grid, PHASE_CAPS[1].power({ value = round(one.power), unit = "W" }))
@@ -247,6 +286,7 @@ local function poll_once(driver, device)
   device:set_field(POLL_IN_PROGRESS_FIELD, false)
   if not ok then
     log.error("SolarEdge poll crashed: " .. tostring(err))
+    record_poll_failure(device)
   end
 end
 
@@ -285,10 +325,12 @@ local function device_init(driver, device)
   -- changes need a new profile name, since a profile's detailView layout
   -- is generated once at creation and doesn't regenerate when the
   -- same-named profile's capability list changes on a later repackage.
+  -- (device.profile.id is a UUID, so it can't be compared to these names.)
   local target = target_profile(device)
-  if device.profile.id ~= target then
-    log.info("SolarEdge migrating device from profile " .. tostring(device.profile.id) .. " to " .. target)
+  if device:get_field(APPLIED_PROFILE_FIELD) ~= target then
+    log.info("SolarEdge applying profile " .. target)
     device:try_update_metadata({ profile = target })
+    device:set_field(APPLIED_PROFILE_FIELD, target, { persist = true })
   end
   start_polling(driver, device)
 end
