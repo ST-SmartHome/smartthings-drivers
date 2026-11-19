@@ -502,13 +502,43 @@ end
 --- with historical data, e.g. the Australian Bureau of Meteorology): the
 --- newest hourly row at or before the controller's current time, plus the
 --- rain recorded today. nil when no enabled source reports observations.
+---
+--- Hourly rain is either the amount in that hour or, as the Bureau of
+--- Meteorology reports it, a running total since 9 am (the same figure
+--- repeats while it's dry). A total is recognised by a positive value
+--- repeating from one hour to the next, and then its latest value is the
+--- rain so far; otherwise the hours are added up.
+local function rain_so_far(by_hour)
+  local hours = {}
+  for hour in pairs(by_hour) do
+    table.insert(hours, hour)
+  end
+  table.sort(hours)
+  local running = false
+  for i = 2, #hours do
+    local a, b = by_hour[hours[i - 1]], by_hour[hours[i]]
+    if a > 0 and a == b then
+      running = true
+      break
+    end
+  end
+  if running then
+    return by_hour[hours[#hours]]
+  end
+  local sum = 0
+  for _, hour in ipairs(hours) do
+    sum = sum + by_hour[hour]
+  end
+  return sum
+end
+
 local function latest_observation(client, today, now_text)
   local list = client:get("parser")
   local best, best_rain
   for _, parser in ipairs((list and list.parsers) or {}) do
     if parser.enabled and parser.hasHistorical then
       local data = client:get("parser/" .. parser.uid .. "/data/" .. today .. "/1")
-      local latest, rain, seen = nil, 0, {}
+      local latest, by_hour = nil, {}
       for _, block in ipairs((data and data.parserData) or {}) do
         for _, day in ipairs(block.dailyValues or {}) do
           for _, h in ipairs(day.hourlyValues or {}) do
@@ -517,14 +547,14 @@ local function latest_observation(client, today, now_text)
               if type(h.temperature) == "number" and (not latest or hour > latest.hour) then
                 latest = h
               end
-              if type(h.rain) == "number" and not seen[hour] then
-                seen[hour] = true
-                rain = rain + h.rain
+              if type(h.rain) == "number" and by_hour[hour] == nil then
+                by_hour[hour] = h.rain
               end
             end
           end
         end
       end
+      local rain = rain_so_far(by_hour)
       if latest and (not best or latest.hour > best.hour) then
         best, best_rain = latest, rain
       end
