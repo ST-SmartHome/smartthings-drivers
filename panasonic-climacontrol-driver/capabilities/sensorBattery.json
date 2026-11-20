@@ -1,0 +1,22 @@
+{
+ "name": "Sensor Battery",
+ "attributes": {
+  "sensorBattery": {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "value": {
+      "type": "string",
+      "maxLength": 50
+     }
+    },
+    "additionalProperties": false,
+    "required": [
+     "value"
+    ]
+   },
+   "enumCommands": []
+  }
+ },
+ "commands": {}
+}

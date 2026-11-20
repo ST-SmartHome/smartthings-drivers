@@ -90,24 +90,26 @@ function Status.power_from_device(v)
   return nil
 end
 
---- Vertical vane: module "1, 2, 3, 4, 5, swing/6, auto/6" (swing and auto
---- are the same setting, 6).
+--- Vertical vane: module "1"-"5" (Highest, Middle, Normal, Low, Lowest),
+--- "swing" and "auto" (separate settings, as on the module's own page).
+--- "6" (older firmware) is swing.
 local VANE_FROM_DEVICE = {
   ["1"] = "1", ["2"] = "2", ["3"] = "3", ["4"] = "4", ["5"] = "5",
-  swing = "auto", auto = "auto", ["6"] = "auto",
+  swing = "swing", ["6"] = "swing", auto = "auto",
 }
-Status.VANE_VALUES = { "auto", "1", "2", "3", "4", "5" }
+Status.VANE_VALUES = { "1", "2", "3", "4", "5", "swing", "auto" }
 
 function Status.vane_from_device(v)
   return VANE_FROM_DEVICE[lower(v)]
 end
 
 --- Horizontal vane: module "maxleft/0, left/1, middle/2, right/3,
---- maxright/4, swing/5". Sent by name. The status reports "auto" too, which
---- shows as Swing (as on the vertical vane, where swing and auto are one).
-local WIDEVANE_BY_NUMBER = { ["0"] = "maxleft", ["1"] = "left", ["2"] = "middle", ["3"] = "right", ["4"] = "maxright", ["5"] = "swing", auto = "swing" }
-local WIDEVANE_NAMES = { maxleft = true, left = true, middle = true, right = true, maxright = true, swing = true }
-Status.WIDEVANE_VALUES = { "swing", "maxleft", "left", "middle", "right", "maxright" }
+--- maxright/4" and "auto" (the module's page has no separate swing; older
+--- "swing"/5 shows as Auto). Units without left/right louvres report
+--- "unknown" (no value).
+local WIDEVANE_BY_NUMBER = { ["0"] = "maxleft", ["1"] = "left", ["2"] = "middle", ["3"] = "right", ["4"] = "maxright", ["5"] = "auto", swing = "auto" }
+local WIDEVANE_NAMES = { maxleft = true, left = true, middle = true, right = true, maxright = true, auto = true }
+Status.WIDEVANE_VALUES = { "maxleft", "left", "middle", "right", "maxright", "auto" }
 
 function Status.widevane_from_device(v)
   local s = lower(v)
@@ -123,7 +125,7 @@ end
 --- Preset: module "normal/1, powerful/2, quiet/3".
 local PRESET_BY_NUMBER = { ["1"] = "normal", ["2"] = "powerful", ["3"] = "quiet" }
 local PRESET_NAMES = { normal = true, powerful = true, quiet = true }
-Status.PRESET_VALUES = { "normal", "powerful", "quiet" }
+Status.PRESET_VALUES = { "quiet", "normal", "powerful" }
 
 function Status.preset_from_device(v)
   local s = lower(v)
@@ -160,6 +162,10 @@ function Status.parse(data)
   return {
     power = power,
     mode = Status.mode_from_device(hp_mode),
+    guard_enabled = Status.first(data, { "general.t_protena" }),
+    guard_state = Status.first(data, { "general.t_protst" }),
+    guard_min = Status.number(Status.first(data, { "general.t_protmin" })),
+    guard_max = Status.number(Status.first(data, { "general.t_protmax" })),
     fan = Status.fan_from_device(Status.first(data, { "heatpump.fan" })),
     setpoint = Status.number(Status.first(data, { "heatpump.set_temperature", "heatpump.settemperature" })),
     setpoint_min = Status.number(Status.first(data, { "heatpump.coolmin" })),
@@ -194,14 +200,75 @@ function Status.parse(data)
     thermo_temp = Status.number(Status.first(data, { "sensor.thermometer.tact" })),
     thermo_humidity = Status.number(Status.first(data, { "sensor.thermometer.hact" })),
     thermo_battery = Status.number(Status.first(data, { "sensor.thermometer.batt" })),
+    -- ProtoART's window/door sensors (up to 4 per module), each { open, battery }.
+    windows = Status.windows(data),
     firmware = Status.first(data, { "fw.curr", "module.fw" }),
   }
 end
 
---- True when the module's temperature input is its wireless thermometer
---- (heatpump.tinp "wireless") and the thermometer is reporting.
-function Status.uses_wireless_thermometer(parsed)
-  return lower(parsed.temp_input) == "wireless" and parsed.thermometer and parsed.thermo_temp ~= nil
+--- The paired window sensors as a list of { open = bool, battery = number|nil }.
+--- One sensor arrives as sensor.window = { state = "open"|"closed", batt, ... };
+--- several may arrive as a list there, or as sensor.window1 .. window4.
+function Status.windows(data)
+  local list, seen = {}, {}
+  local function add(w)
+    if type(w) == "table" and w.state ~= nil then
+      local mac = w.mac and tostring(w.mac):gsub("[^%x]", ""):lower() or nil
+      if mac and #mac ~= 12 then
+        mac = nil
+      end
+      -- The same sensor reported in two layouts counts once.
+      if mac and seen[mac] then
+        return
+      end
+      if mac then
+        seen[mac] = true
+      end
+      table.insert(list, { open = lower(w.state) == "open", battery = Status.number(w.batt), mac = mac, name = w.name })
+    end
+  end
+  local w = Status.get(data, "sensor.window")
+  if type(w) == "table" then
+    if w.state ~= nil then
+      add(w)
+    else
+      for _, item in ipairs(w) do
+        add(item)
+      end
+    end
+  end
+  for i = 1, 4 do
+    add(Status.get(data, "sensor.window" .. i))
+  end
+  return list
+end
+
+--- A sensor's battery for its tile: "100 %", "12 % (replace)".
+function Status.battery_text(percent)
+  local n = tonumber(percent)
+  if not n then
+    return nil
+  end
+  n = math.floor(n + 0.5)
+  return n .. " %" .. (n < 15 and " (replace)" or "")
+end
+
+--- The room temperature guard (general.t_prot*): "Armed 10–40 °C",
+--- "Active 10–40 °C" (it has switched the unit on) or "Off".
+function Status.guard_text(parsed)
+  local enabled, state = lower(parsed.guard_enabled) or "", lower(parsed.guard_state) or ""
+  if enabled == "" and state == "" then
+    return nil
+  end
+  if enabled == "false" or enabled == "off" or enabled == "0" then
+    return "Off"
+  end
+  local range = ""
+  if parsed.guard_min and parsed.guard_max then
+    range = string.format(" %g\u{2013}%g \u{00B0}C", parsed.guard_min, parsed.guard_max)
+  end
+  local word = state == "armed" and "Armed" or (state ~= "" and (state:sub(1, 1):upper() .. state:sub(2)) or "On")
+  return word .. range
 end
 
 --- True when the status says the module can't talk to the air conditioner.
@@ -222,7 +289,8 @@ local function no(v)
   return s == "false" or s == "0" or s == "off"
 end
 
---- "Connected" / "Not connected (check the CN-CNT cable)", plus the EXT port.
+--- "Connected" / "Not connected (check the CN-CNT cable)", plus the EXT port
+--- only when something (e.g. a Comfort Cloud adapter) is plugged into it.
 function Status.link_text(parsed)
   local text
   if yes(parsed.connected) then
@@ -233,17 +301,15 @@ function Status.link_text(parsed)
     return nil
   end
   if yes(parsed.ext_connected) then
-    text = text .. " · EXT port connected"
-  elseif no(parsed.ext_connected) then
-    text = text .. " · EXT port not connected"
+    text = text .. " · EXT port in use"
   end
   return text
 end
 
 local TEMP_INPUT_TEXT = {
-  wireless = "Wireless thermometer",
-  external = "Remote temperature",
-  internal = "Air conditioner's own sensor",
+  internal = "Internal",
+  wireless = "Wireless",
+  external = "External",
 }
 
 function Status.temp_input_text(v)

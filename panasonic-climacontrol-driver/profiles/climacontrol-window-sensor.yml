@@ -1,0 +1,13 @@
+name: climacontrol-window-sensor.v1
+components:
+  - id: main
+    label: "Window/Door"
+    capabilities:
+      - id: contactSensor
+        version: 1
+      - id: battery
+        version: 1
+      - id: refresh
+        version: 1
+    categories:
+      - name: ContactSensor

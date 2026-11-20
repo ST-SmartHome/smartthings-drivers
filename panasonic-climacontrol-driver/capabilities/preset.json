@@ -8,9 +8,9 @@
      "value": {
       "type": "string",
       "enum": [
+       "quiet",
        "normal",
-       "powerful",
-       "quiet"
+       "powerful"
       ]
      }
     },
@@ -33,9 +33,9 @@
      "schema": {
       "type": "string",
       "enum": [
+       "quiet",
        "normal",
-       "powerful",
-       "quiet"
+       "powerful"
       ]
      }
     }

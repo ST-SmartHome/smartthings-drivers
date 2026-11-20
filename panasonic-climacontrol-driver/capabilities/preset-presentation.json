@@ -10,12 +10,16 @@
  },
  "detailView": [
   {
-   "label": "Preset",
+   "label": "Presets",
    "displayType": "list",
    "list": {
     "command": {
      "name": "setPreset",
      "alternatives": [
+      {
+       "key": "quiet",
+       "value": "Quiet"
+      },
       {
        "key": "normal",
        "value": "Normal"
@@ -23,10 +27,6 @@
       {
        "key": "powerful",
        "value": "Powerful"
-      },
-      {
-       "key": "quiet",
-       "value": "Quiet"
       }
      ]
     },
@@ -34,16 +34,16 @@
      "value": "preset.value",
      "alternatives": [
       {
+       "key": "quiet",
+       "value": "Quiet"
+      },
+      {
        "key": "normal",
        "value": "Normal"
       },
       {
        "key": "powerful",
        "value": "Powerful"
-      },
-      {
-       "key": "quiet",
-       "value": "Quiet"
       }
      ]
     }
@@ -53,10 +53,14 @@
  "automation": {
   "conditions": [
    {
-    "label": "Preset",
+    "label": "Presets",
     "displayType": "list",
     "list": {
      "alternatives": [
+      {
+       "key": "quiet",
+       "value": "Quiet"
+      },
       {
        "key": "normal",
        "value": "Normal"
@@ -64,10 +68,6 @@
       {
        "key": "powerful",
        "value": "Powerful"
-      },
-      {
-       "key": "quiet",
-       "value": "Quiet"
       }
      ],
      "value": "preset.value"
@@ -76,10 +76,14 @@
   ],
   "actions": [
    {
-    "label": "Preset",
+    "label": "Presets",
     "displayType": "list",
     "list": {
      "alternatives": [
+      {
+       "key": "quiet",
+       "value": "Quiet"
+      },
       {
        "key": "normal",
        "value": "Normal"
@@ -87,10 +91,6 @@
       {
        "key": "powerful",
        "value": "Powerful"
-      },
-      {
-       "key": "quiet",
-       "value": "Quiet"
       }
      ],
      "command": "setPreset"

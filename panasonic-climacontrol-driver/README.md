@@ -16,15 +16,15 @@ One device per module (one per indoor unit):
 - **Set Temperature:** in 0.5 °C steps, within the range the module reports (`coolmin`–`coolmax`, for example 16–31 °C); 16–30 °C until it does.
 - **Temperature:** the room temperature the module reports.
 - **Preset:** Normal, Powerful, Quiet.
-- **Vertical Vane:** Auto (swing), 1–5.
-- **Horizontal Vane:** Swing, Far left, Left, Centre, Right, Far right (the module's `auto` shows as Swing).
+- **Vane Up/Down:** Highest, Middle, Normal, Low, Lowest, Swing, Auto.
+- **Vane Left/Right:** Maximum Left, Left, Middle, Right, Maximum Right, Auto.
 - **Power:** watts, when the unit reports it.
 - **Outdoor Unit** component: outdoor temperature, when the unit reports it.
 - **Eco**, **Eco Navi**, **nanoe X** and **Mild Dry** components: one switch each. Which of these work depends on the indoor unit's features.
 - **Wireless Thermometer** component: temperature, humidity and battery from ProtoART's wireless thermometer (see [Wireless thermometer](#wireless-thermometer)).
 - **Module** component (the ClimateControl module itself):
   - **Indoor Unit Link:** whether the module can talk to the air conditioner over CN-CNT, and whether its EXT port is connected;
-  - **Temperature Input:** which sensor the air conditioner is using (wireless thermometer, remote temperature, or its own);
+  - **Temperature Input:** which sensor the air conditioner is using: Internal (its own), Wireless (thermometer) or External (remote temperature), as on the module's page;
   - **Wifi Signal** (dBm and a rating), **Ip Address**, **Mac Address**;
   - **Firmware**, with the latest version when an update is available;
   - **Uptime** (to the hour) and **Module ID**;
@@ -73,7 +73,7 @@ Settings:
 | Power (W) | `heatpump.op.pinp` |
 | Preset | `heatpump.preset` (`normal`, `powerful`, `quiet`, or `1`–`3`) |
 | Vertical vane | `heatpump.vane` (`1`–`5`; `swing`, `auto` or `6` show as Auto) |
-| Horizontal vane | `heatpump.widevane` (`maxleft`, `left`, `middle`, `right`, `maxright`, `swing`, or `0`–`5`; `auto` shows as Swing) |
+| Horizontal vane | `heatpump.widevane` (`maxleft`, `left`, `middle`, `right`, `maxright`, `auto`, or `0`–`4`; older `swing`/`5` shows as Auto) |
 | Eco, Eco Navi, nanoe X, Mild Dry | `heatpump.eco`, `econavi`, `nanoex`, `milddry` (`on`/`off`, `1`/`0`, `true`/`false`) |
 | Indoor Unit Link | `sys.conhp`, `sys.conext` (`True`/`False`) |
 | Temperature Input | `heatpump.tinp` (`wireless`, `external`, `internal`) |

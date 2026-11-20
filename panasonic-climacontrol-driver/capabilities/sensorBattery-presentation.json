@@ -1,0 +1,20 @@
+{
+ "dashboard": {
+  "states": [
+   {
+    "label": "{{sensorBattery.value}}"
+   }
+  ],
+  "actions": [],
+  "panelItems": []
+ },
+ "detailView": [
+  {
+   "label": "Battery",
+   "displayType": "state",
+   "state": {
+    "label": "{{sensorBattery.value}}"
+   }
+  }
+ ]
+}

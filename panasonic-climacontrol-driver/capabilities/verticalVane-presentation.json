@@ -10,35 +10,39 @@
  },
  "detailView": [
   {
-   "label": "Vertical Vane",
+   "label": "Vane Up/Down",
    "displayType": "list",
    "list": {
     "command": {
      "name": "setVane",
      "alternatives": [
       {
-       "key": "auto",
-       "value": "Auto"
-      },
-      {
        "key": "1",
-       "value": "1 (top)"
+       "value": "Highest"
       },
       {
        "key": "2",
-       "value": "2"
+       "value": "Middle"
       },
       {
        "key": "3",
-       "value": "3"
+       "value": "Normal"
       },
       {
        "key": "4",
-       "value": "4"
+       "value": "Low"
       },
       {
        "key": "5",
-       "value": "5 (bottom)"
+       "value": "Lowest"
+      },
+      {
+       "key": "swing",
+       "value": "Swing"
+      },
+      {
+       "key": "auto",
+       "value": "Auto"
       }
      ]
     },
@@ -46,28 +50,32 @@
      "value": "vane.value",
      "alternatives": [
       {
-       "key": "auto",
-       "value": "Auto"
-      },
-      {
        "key": "1",
-       "value": "1 (top)"
+       "value": "Highest"
       },
       {
        "key": "2",
-       "value": "2"
+       "value": "Middle"
       },
       {
        "key": "3",
-       "value": "3"
+       "value": "Normal"
       },
       {
        "key": "4",
-       "value": "4"
+       "value": "Low"
       },
       {
        "key": "5",
-       "value": "5 (bottom)"
+       "value": "Lowest"
+      },
+      {
+       "key": "swing",
+       "value": "Swing"
+      },
+      {
+       "key": "auto",
+       "value": "Auto"
       }
      ]
     }
@@ -77,33 +85,37 @@
  "automation": {
   "conditions": [
    {
-    "label": "Vertical Vane",
+    "label": "Vane Up/Down",
     "displayType": "list",
     "list": {
      "alternatives": [
       {
-       "key": "auto",
-       "value": "Auto"
-      },
-      {
        "key": "1",
-       "value": "1 (top)"
+       "value": "Highest"
       },
       {
        "key": "2",
-       "value": "2"
+       "value": "Middle"
       },
       {
        "key": "3",
-       "value": "3"
+       "value": "Normal"
       },
       {
        "key": "4",
-       "value": "4"
+       "value": "Low"
       },
       {
        "key": "5",
-       "value": "5 (bottom)"
+       "value": "Lowest"
+      },
+      {
+       "key": "swing",
+       "value": "Swing"
+      },
+      {
+       "key": "auto",
+       "value": "Auto"
       }
      ],
      "value": "vane.value"
@@ -112,33 +124,37 @@
   ],
   "actions": [
    {
-    "label": "Vertical Vane",
+    "label": "Vane Up/Down",
     "displayType": "list",
     "list": {
      "alternatives": [
       {
-       "key": "auto",
-       "value": "Auto"
-      },
-      {
        "key": "1",
-       "value": "1 (top)"
+       "value": "Highest"
       },
       {
        "key": "2",
-       "value": "2"
+       "value": "Middle"
       },
       {
        "key": "3",
-       "value": "3"
+       "value": "Normal"
       },
       {
        "key": "4",
-       "value": "4"
+       "value": "Low"
       },
       {
        "key": "5",
-       "value": "5 (bottom)"
+       "value": "Lowest"
+      },
+      {
+       "key": "swing",
+       "value": "Swing"
+      },
+      {
+       "key": "auto",
+       "value": "Auto"
       }
      ],
      "command": "setVane"
