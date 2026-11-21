@@ -109,6 +109,9 @@ local function get_settings(device)
     ip = nil
   end
   local pw = p.modulePassword
+  if type(pw) ~= "string" or pw == "" then
+    pw = device:get_field(discovery.PASSWORD_FIELD)   -- one that worked during a scan
+  end
   return {
     ip = ip,
     password = (type(pw) == "string" and pw ~= "") and pw or nil,
@@ -311,7 +314,11 @@ local function expect(device, key, value, before)
     window_open = window_open or w.open
   end
   if before ~= nil and before ~= value and not window_open then
-    pending[key] = { value = value, before = before, at = os.time() }
+    -- The other settings at the time: if one changes (another command, the
+    -- remote, the module's page), a put-back may be that change's doing
+    -- (e.g. Powerful cancelling Eco), so the check is dropped.
+    pending[key] = { value = value, before = before, at = os.time(),
+      preset = last.preset, mode = last.mode, fan = last.fan }
   end
   device:set_field(PENDING_FIELD, pending)
 end
@@ -343,11 +350,13 @@ local function judge(device, parsed)
   for key, p in pairs(pending) do
     local now = current_value(parsed, key)
     local age = os.time() - p.at
-    if window_open or parsed.power ~= "on" then
+    local others_changed = parsed.preset ~= p.preset or parsed.fan ~= p.fan
+        or (key ~= "heat" and parsed.mode ~= p.mode)
+    if window_open or parsed.power ~= "on" or others_changed then
       pending[key] = nil
     elseif now == p.before and age < 4 then
       -- Too soon: the module may not have passed the command on yet.
-    elseif now == p.before then
+    elseif now == p.before and age <= JUDGE_SECONDS then
       pending[key] = nil
       local before_hidden = rejected(device, key)
       learned[key] = (learned[key] or 0) + 1
@@ -505,10 +514,13 @@ local function update_sensors(device, parsed)
     device:set_field(field, absent)
     return absent < THERMO_REMOVE_AFTER_POLLS
   end
-  local want_t = want(parsed.thermometer and parsed.thermo_temp ~= nil, has_t, THERMO_ABSENT_FIELD)
+  local want_t = want(parsed.thermometer, has_t, THERMO_ABSENT_FIELD)
   local want_w = want(#(parsed.windows or {}) > 0, has_w, WINDOW_ABSENT_FIELD)
+  -- What the sensors call for; poll_once asks for the profile once, together
+  -- with anything learned in the same poll.
+  device:set_field("want_sensors", { want_t, want_w })
   if want_t ~= has_t or want_w ~= has_w then
-    request_profile(device, wanted_profile(device, want_t, want_w))
+    device:set_field("profile_due", true)
   end
   if has_t and parsed.thermometer then
     if parsed.thermo_temp then
@@ -626,8 +638,9 @@ local emit_supported
 local function poll_once(driver, device)
   local failures = device:get_field(FAILURES_FIELD) or 0
   local last_scan = device:get_field(LAST_SCAN_FIELD) or 0
-  local rescan = failures >= REDISCOVER_AFTER_FAILURES and not device:get_field(AUTH_FIELD)
-      and os.time() - last_scan >= RESCAN_SECONDS
+  -- An auth failure may be another module now at the old address, so the
+  -- rescan (by MAC, at most every RESCAN_SECONDS) still runs.
+  local rescan = failures >= REDISCOVER_AFTER_FAILURES and os.time() - last_scan >= RESCAN_SECONDS
   local ip = resolve_ip(driver, device, rescan)
   if not ip then
     log.warn(device.label .. ": module not found; set its IP Address in Settings or check it's on the network")
@@ -637,7 +650,8 @@ local function poll_once(driver, device)
   device:set_field(AUTH_FIELD, kind == "auth" or nil)
   if not data then
     log.warn(device.label .. ": status from " .. ip .. " failed: " .. tostring(err))
-    return false
+    -- Someone is logged in on the module's page: not the module's fault.
+    return kind == "busy" and "busy" or false
   end
   if not device:get_field(LAYOUT_LOGGED_FIELD) then
     device:set_field(LAYOUT_LOGGED_FIELD, true)
@@ -645,7 +659,19 @@ local function poll_once(driver, device)
   end
   local parsed = Status.parse(data)
   local mac = Status.mac_key(parsed.mac)
-  if mac and device:get_field(MAC_FIELD) ~= mac then
+  local own = mac_of(device)
+  if mac and own and mac ~= own then
+    -- Another module now has this address (e.g. after a power cut): look for
+    -- this device's own module instead of taking over the other one.
+    log.warn(device.label .. ": " .. ip .. " is now another module (" .. mac .. "); looking for its own")
+    device:set_field(IP_FIELD, nil, { persist = true })
+    if driver.found_ips then
+      driver.found_ips[device.device_network_id] = nil
+    end
+    device:set_field(LAST_SCAN_FIELD, 0)
+    return false
+  end
+  if mac and not own then
     device:set_field(MAC_FIELD, mac, { persist = true })
   end
   if Status.unit_disconnected(parsed) then
@@ -654,16 +680,29 @@ local function poll_once(driver, device)
   device:set_field(LAST_FIELD, parsed)
   apply_status(device, parsed)
   if judge(device, parsed) then
-    local comps = device.profile.components
     emit_supported(device)
-    request_profile(device, wanted_profile(device, comps.thermometer ~= nil, comps.window ~= nil))
+    device:set_field("profile_due", true)
+  end
+  if device:get_field("profile_due") then
+    device:set_field("profile_due", nil)
+    local comps, want = device.profile.components, device:get_field("want_sensors")
+    local t, w = comps.thermometer ~= nil, comps.window ~= nil
+    if want then
+      t, w = want[1], want[2]
+    end
+    request_profile(device, wanted_profile(device, t, w))
   end
   update_window_children(driver, device, parsed.windows or {})
   return true
 end
 
+local retry_guard   -- send_guard, defined with the settings below
+
 local function poll(driver, device)
   local ok, result = pcall(poll_once, driver, device)
+  if ok and result == true and retry_guard then
+    pcall(retry_guard, driver, device)
+  end
   if not ok then
     log.error(device.label .. ": poll error: " .. tostring(result))
   end
@@ -707,7 +746,10 @@ end
 -- ===== Commands =====
 
 --- Send commands (a list of {key, value}), then read the status back soon.
-local function send(driver, device, commands)
+--- check = { key, value, before } (optional): judge over the next minute
+--- whether the unit keeps it. Any command cancels earlier pending checks.
+local function send(driver, device, commands, check)
+  device:set_field(PENDING_FIELD, nil)
   local ip = resolve_ip(driver, device, false)
   if not ip then
     log.warn(device.label .. ": command ignored, module address unknown")
@@ -721,6 +763,9 @@ local function send(driver, device, commands)
       return false
     end
   end
+  if check then
+    expect(device, check[1], check[2], check[3])
+  end
   device:set_field(FAST_POLLS_FIELD, FAST_POLLS)
   schedule_poll(driver, device, COMMAND_REPOLL_SECONDS)
   return true
@@ -731,11 +776,12 @@ end
 local function set_switch(driver, device, command, state)
   local component = command.component or "main"
   local key = component == "main" and "power" or component
+  local check
   if key ~= "power" then
     local last = device:get_field(LAST_FIELD) or {}
-    expect(device, key, state, state == "on" and last.power == "on" and (last.features or {})[key] or nil)
+    check = { key, state, state == "on" and last.power == "on" and (last.features or {})[key] or nil }
   end
-  if send(driver, device, { { key, state } }) then
+  if send(driver, device, { { key, state } }, check) then
     emit(device, component, "switch", capabilities.switch.switch(state))
   end
 end
@@ -765,8 +811,7 @@ end
 local function set_widevane(driver, device, command)
   local value = command.args.value
   local last = device:get_field(LAST_FIELD) or {}
-  expect(device, "widevane", value, last.power == "on" and last.widevane or nil)
-  if send(driver, device, { { "widevane", value } }) then
+  if send(driver, device, { { "widevane", value } }, { "widevane", value, last.power == "on" and last.widevane or nil }) then
     emit(device, "main", "widevane", WIDEVANE_CAP.vane(value))
   end
 end
@@ -788,9 +833,8 @@ local function set_mode(driver, device, command)
   if turn_on then
     table.insert(commands, { "power", "on" })
   end
-  expect(device, "heat", mode == "heat" and "heat" or nil,
-    mode == "heat" and (last.power == "on" or turn_on) and last.mode or nil)
-  if send(driver, device, commands) then
+  local check = mode == "heat" and { "heat", "heat", (last.power == "on" or turn_on) and last.mode or nil } or nil
+  if send(driver, device, commands, check) then
     emit(device, "main", "mode", capabilities.airConditionerMode.airConditionerMode(Status.mode_from_device(value)))
     if turn_on then
       emit(device, "main", "switch", capabilities.switch.switch("on"))
@@ -876,11 +920,20 @@ emit_supported = function(device)
   emit_setpoint_range(device)
 end
 
+--- A password that unlocked this module during the scan that added it.
+local function adopt_found_password(driver, device)
+  local pw = driver.found_passwords and driver.found_passwords[device.device_network_id]
+  if pw and not device:get_field(discovery.PASSWORD_FIELD) then
+    device:set_field(discovery.PASSWORD_FIELD, pw, { persist = true })
+  end
+end
+
 local function device_init(driver, device)
   if is_window_child(device) then
     device:set_field(CHILD_CACHE_FIELD, {})   -- the parent's next poll fills it
     return
   end
+  adopt_found_password(driver, device)
   -- A device created with an older profile gets the current one.
   if not device:supports_capability_by_id(RESTART_CAP.ID) then
     log.info(tostring(device.label) .. ": switching to profile " .. PROFILE)
@@ -903,53 +956,21 @@ local function device_added(driver, device)
   if is_window_child(device) then
     return
   end
+  adopt_found_password(driver, device)
   emit_supported(device)
 end
 
---- Room guard settings changed in SmartThings: send only what changed (a
---- setting left at "Leave as set" / 0 keeps the module's own value).
-local function apply_guard_settings(driver, device, old)
-  local p, o = device.preferences or {}, old or {}
-  if p.roomGuard == o.roomGuard and p.roomGuardLow == o.roomGuardLow and p.roomGuardHigh == o.roomGuardHigh then
-    return
-  end
-  local last = device:get_field(LAST_FIELD) or {}
-  local values = {}
-  if p.roomGuard ~= o.roomGuard and (p.roomGuard == "on" or p.roomGuard == "off") then
-    table.insert(values, { "t_protena", p.roomGuard == "on" and "true" or "false" })
-  end
-  -- A value outside the module's 5-40 °C becomes the nearest limit, and the
-  -- lowest stays at least 1 °C below the highest.
-  local function clamp(v, lo, hi)
-    return math.max(lo, math.min(hi, math.floor(v + 0.5)))
-  end
-  local low_changed = p.roomGuardLow ~= o.roomGuardLow and tonumber(p.roomGuardLow) ~= nil
-  local high_changed = p.roomGuardHigh ~= o.roomGuardHigh and tonumber(p.roomGuardHigh) ~= nil
-  if low_changed or high_changed then
-    local lo = low_changed and clamp(tonumber(p.roomGuardLow), GUARD_MIN, GUARD_MAX - 1) or last.guard_min
-    local hi = high_changed and clamp(tonumber(p.roomGuardHigh), GUARD_MIN + 1, GUARD_MAX) or last.guard_max
-    if lo and hi and lo >= hi then
-      if high_changed then
-        lo = hi - 1
-        low_changed = true
-      else
-        hi = lo + 1
-        high_changed = true
-      end
-    end
-    if low_changed and lo then
-      table.insert(values, { "t_protmin", tostring(lo) })
-    end
-    if high_changed and hi then
-      table.insert(values, { "t_protmax", tostring(hi) })
-    end
-  end
-  if #values == 0 then
+--- Room guard values waiting to reach the module (persisted, retried on
+--- every poll until the module accepts them).
+local GUARD_PENDING_FIELD = "guard_pending"
+
+local function send_guard(driver, device)
+  local values = device:get_field(GUARD_PENDING_FIELD)
+  if type(values) ~= "table" or #values == 0 then
     return
   end
   local ip = resolve_ip(driver, device, false)
   if not ip then
-    log.warn(device.label .. ": room guard not sent, module address unknown")
     return
   end
   local ok, err = Api.settings(ip, values, get_settings(device).password)
@@ -959,10 +980,52 @@ local function apply_guard_settings(driver, device, old)
       table.insert(text, kv[1] .. "=" .. kv[2])
     end
     log.info(device.label .. ": room guard set (" .. table.concat(text, ", ") .. ")")
+    device:set_field(GUARD_PENDING_FIELD, nil, { persist = true })
   else
-    log.warn(device.label .. ": room guard setting failed: " .. tostring(err))
+    log.warn(device.label .. ": room guard not sent yet (" .. tostring(err) .. "); will retry")
   end
 end
+
+--- Room guard settings changed in SmartThings. Only a setting that was there
+--- before and changed counts (so new settings arriving with an update never
+--- overwrite the module's own guard); changing either limit sends both, as
+--- shown in Settings.
+local function apply_guard_settings(driver, device, old)
+  if type(old) ~= "table" then
+    return
+  end
+  local p = device.preferences or {}
+  local function changed_key(k)
+    return old[k] ~= nil and p[k] ~= nil and p[k] ~= old[k]
+  end
+  local values = {}
+  if changed_key("roomGuard") and (p.roomGuard == "on" or p.roomGuard == "off") then
+    table.insert(values, { "t_protena", p.roomGuard == "on" and "true" or "false" })
+  end
+  if changed_key("roomGuardLow") or changed_key("roomGuardHigh") then
+    -- A value outside the module's 5-40 °C becomes the nearest limit.
+    local function clamp(v, lo, hi)
+      return math.max(lo, math.min(hi, math.floor(v + 0.5)))
+    end
+    local lo, hi = tonumber(p.roomGuardLow), tonumber(p.roomGuardHigh)
+    if lo and hi then
+      lo, hi = clamp(lo, GUARD_MIN, GUARD_MAX), clamp(hi, GUARD_MIN, GUARD_MAX)
+      if lo < hi then
+        table.insert(values, { "t_protmin", tostring(lo) })
+        table.insert(values, { "t_protmax", tostring(hi) })
+      else
+        log.warn(device.label .. ": room guard lowest (" .. lo .. ") must be below highest (" .. hi .. "); limits not sent")
+      end
+    end
+  end
+  if #values == 0 then
+    return
+  end
+  device:set_field(GUARD_PENDING_FIELD, values, { persist = true })
+  send_guard(driver, device)
+end
+
+retry_guard = send_guard
 
 local function info_changed(driver, device, event, args)
   if is_window_child(device) then

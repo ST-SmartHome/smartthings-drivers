@@ -19,6 +19,15 @@ http.TIMEOUT = 6
 local Api = {}
 
 local sessions = {}   -- ip -> "session=..." cookie
+local logged_in_at = {}   -- ip -> os.time() of the last login
+-- ip -> { until_time, error, kind }: no login attempts until then. Set after a
+-- wrong password (so it isn't retried on every poll) and when the session is
+-- lost again right after logging in, i.e. someone is using the module's own
+-- web page (one login at a time): logging in again would log them out.
+local blocked = {}
+local WRONG_PASSWORD_WAIT = 300
+local PAGE_IN_USE_WAIT = 180
+local RELOGIN_TOO_SOON = 60
 
 local function escape(v)
   return (tostring(v):gsub("[^%w%-%._~]", function(c)
@@ -65,6 +74,7 @@ function Api.login(ip, password)
     return nil, where:find("err=1", 1, true) and "wrong password" or ("login failed (HTTP " .. tostring(code) .. ")")
   end
   sessions[ip] = cookie
+  logged_in_at[ip] = os.time()
   return true
 end
 
@@ -91,8 +101,22 @@ local function get(ip, path, password)
     if not password or password == "" then
       return nil, "the module has a password: enter it in the device's Settings", "auth"
     end
+    local now = os.time()
+    local b = blocked[ip]
+    if b and now < b[1] then
+      return nil, b[2], b[3]
+    end
+    blocked[ip] = nil
+    if logged_in_at[ip] and now - logged_in_at[ip] < RELOGIN_TOO_SOON then
+      blocked[ip] = { now + PAGE_IN_USE_WAIT, "the module's web page is in use (one login at a time); trying again later", "busy" }
+      logged_in_at[ip] = nil
+      return nil, blocked[ip][2], "busy"
+    end
     local ok, err = Api.login(ip, password)
     if not ok then
+      if err == "wrong password" then
+        blocked[ip] = { now + WRONG_PASSWORD_WAIT, "login: wrong password (check the device's Settings)", "auth" }
+      end
       return nil, "login: " .. tostring(err), "auth"
     end
     body, code = raw_get(ip, path)
@@ -119,9 +143,9 @@ end
 --- Forget a module's session (e.g. after its password setting changed).
 function Api.forget(ip)
   if ip then
-    sessions[ip] = nil
+    sessions[ip], blocked[ip], logged_in_at[ip] = nil, nil, nil
   else
-    sessions = {}
+    sessions, blocked, logged_in_at = {}, {}, {}
   end
 end
 
@@ -141,9 +165,9 @@ end
 --- One heatpump command, e.g. Api.command(ip, "power", "on", password).
 --- Returns true, or nil and an error.
 function Api.command(ip, key, value, password)
-  local body, err = get(ip, "/control?cmd=heatpump&" .. escape(key) .. "=" .. escape(value), password)
+  local body, err, kind = get(ip, "/control?cmd=heatpump&" .. escape(key) .. "=" .. escape(value), password)
   if not body then
-    return nil, err
+    return nil, err, kind
   end
   return true
 end

@@ -32,7 +32,8 @@ local DNI_PREFIX = "climacontrol-"
 local MANUAL_DNI = DNI_PREFIX .. "manual"
 local HOST_PREFIX = DNI_PREFIX .. "host-"
 
-local Discovery = { DNI_PREFIX = DNI_PREFIX, MANUAL_DNI = MANUAL_DNI, HOST_PREFIX = HOST_PREFIX }
+local Discovery = { DNI_PREFIX = DNI_PREFIX, MANUAL_DNI = MANUAL_DNI, HOST_PREFIX = HOST_PREFIX,
+  PASSWORD_FIELD = "password" }   -- a password found to work during a scan
 
 local SERVICE_TYPES = { "_http._tcp" }
 local NAME_HINTS = { "heatpump", "hvac", "clima", "factory" }
@@ -87,10 +88,11 @@ end
 function Discovery.known_passwords(driver)
   local list, seen = {}, {}
   for _, device in ipairs(driver and driver:get_devices() or {}) do
-    local pw = (device.preferences or {}).modulePassword
-    if type(pw) == "string" and pw ~= "" and not seen[pw] then
-      seen[pw] = true
-      table.insert(list, pw)
+    for _, pw in ipairs({ (device.preferences or {}).modulePassword, device:get_field(Discovery.PASSWORD_FIELD) }) do
+      if type(pw) == "string" and pw ~= "" and not seen[pw] then
+        seen[pw] = true
+        table.insert(list, pw)
+      end
     end
   end
   return list
@@ -98,7 +100,7 @@ end
 
 --- True unless the status names a non-Panasonic interface (sys.hw).
 local function is_panasonic(data)
-  local hw = type(data.sys) == "table" and data.sys.hw
+  local hw = type(data.sys) == "table" and data.sys.hw or nil
   return hw == nil or tostring(hw):upper():find("^PANA") ~= nil
 end
 
@@ -108,6 +110,7 @@ function Discovery.find_modules(passwords)
   local modules = {}
   for _, c in ipairs(Discovery.candidates()) do
     local data, err, kind = Api.status(c.ip)
+    local used_pw
     if not data and kind == "auth" then
       if not Api.is_climatecontrol(c.ip) then
         kind, err = nil, "asks for a login but isn't a ClimateControl module"
@@ -115,16 +118,18 @@ function Discovery.find_modules(passwords)
         for _, pw in ipairs(passwords or {}) do
           data, err, kind = Api.status(c.ip, pw)
           if data then
+            used_pw = pw
             break
           end
         end
       end
     end
     if data and type(data.heatpump) == "table" and not is_panasonic(data) then
-      log.info("ClimateControl module at " .. c.ip .. " is for another brand (" .. tostring(data.sys.hw) .. "): skipped")
+      log.info("ClimateControl module at " .. c.ip .. " is for another brand (" .. tostring((data.sys or {}).hw) .. "): skipped")
     elseif data and type(data.heatpump) == "table" then
       local parsed = Status.parse(data)
-      table.insert(modules, { ip = c.ip, host = c.host, mac = Status.mac_key(parsed.mac), name = parsed.name, data = data })
+      table.insert(modules, { ip = c.ip, host = c.host, mac = Status.mac_key(parsed.mac), name = parsed.name, data = data,
+        password = used_pw })
     elseif kind == "auth" then
       table.insert(modules, { ip = c.ip, host = c.host, locked = true })
     else
@@ -135,22 +140,32 @@ function Discovery.find_modules(passwords)
 end
 
 local function existing_dnis(driver)
-  local dnis, ips = {}, {}
+  local dnis, ips, macs = {}, {}, {}
   for _, device in ipairs(driver:get_devices()) do
     dnis[tostring(device.device_network_id)] = device
-    local ip = device:get_field("ip") or (device.preferences or {}).ipAddress
-    if ip and ip ~= "0.0.0.0" then
-      ips[ip] = device
+    for _, ip in ipairs({ device:get_field("ip"), (device.preferences or {}).ipAddress }) do
+      if ip and ip ~= "0.0.0.0" then
+        ips[ip] = ips[ip] or device
+      end
+    end
+    local mac = device:get_field("mac")
+    if mac then
+      macs[mac] = device
     end
   end
-  return dnis, ips
+  return dnis, ips, macs
+end
+
+--- Stands in for a device created earlier in the same scan.
+local function placeholder(ip)
+  return { preferences = {}, get_field = function(_, k) return k == "ip" and ip or nil end }
 end
 
 function Discovery.discovery_handler(driver, opts, cons)
   if Discovery.on_scan then
     Discovery.on_scan(driver)   -- e.g. deleted sensor devices may be added again
   end
-  local existing, existing_ips = existing_dnis(driver)
+  local existing, existing_ips, existing_macs = existing_dnis(driver)
   local modules = Discovery.find_modules(Discovery.known_passwords(driver))
   log.info("ClimateControl discovery: " .. #modules .. " module(s) answered")
   local created = 0
@@ -176,11 +191,16 @@ function Discovery.discovery_handler(driver, opts, cons)
         end
       end
     else
-      known = existing[dni] or existing_ips[m.ip]
+      known = existing[dni] or (m.mac and existing_macs[m.mac]) or existing_ips[m.ip]
       -- Added while locked, under its name, and its address not known yet.
       local by_host = m.host and existing[HOST_PREFIX .. m.host]
       if not known and by_host and not by_host:get_field("ip") and not by_host:get_field("mac") then
         known = by_host
+      end
+      -- Unlocked with another device's password: remember it for this one.
+      if known and m.password and known.set_field and not known:get_field(Discovery.PASSWORD_FIELD)
+          and ((known.preferences or {}).modulePassword or "") == "" then
+        known:set_field(Discovery.PASSWORD_FIELD, m.password, { persist = true })
       end
     end
     if m.locked then
@@ -205,6 +225,12 @@ function Discovery.discovery_handler(driver, opts, cons)
         created = created + 1
         driver.found_ips = driver.found_ips or {}
         driver.found_ips[dni] = m.ip
+        if m.password then
+          driver.found_passwords = driver.found_passwords or {}
+          driver.found_passwords[dni] = m.password
+        end
+        existing[dni] = placeholder(m.ip)
+        existing_ips[m.ip] = existing[dni]
       elseif not tostring(err):find("DNI already exists") then
         log.error("Failed to create ClimateControl device: " .. tostring(err))
       end

@@ -168,8 +168,8 @@ function Status.parse(data)
     guard_max = Status.number(Status.first(data, { "general.t_protmax" })),
     fan = Status.fan_from_device(Status.first(data, { "heatpump.fan" })),
     setpoint = Status.number(Status.first(data, { "heatpump.set_temperature", "heatpump.settemperature" })),
-    setpoint_min = Status.number(Status.first(data, { "heatpump.coolmin" })),
-    setpoint_max = Status.number(Status.first(data, { "heatpump.coolmax" })),
+    setpoint_min = Status.number(Status.first(data, { "general.t_coolmin", "heatpump.coolmin" })),
+    setpoint_max = Status.number(Status.first(data, { "general.t_coolmax", "heatpump.coolmax" })),
     room = Status.number(Status.first(data, {
       "heatpump.actual_temperature", "heatpump.room_temperature", "heatpump.roomtemperature", "heatpump.temperature",
     })),
@@ -207,8 +207,9 @@ function Status.parse(data)
 end
 
 --- The paired window sensors as a list of { open = bool, battery = number|nil }.
---- One sensor arrives as sensor.window = { state = "open"|"closed", batt, ... };
---- several may arrive as a list there, or as sensor.window1 .. window4.
+--- Slot 1 arrives as sensor.window = { state = "open"|"closed", batt, ... },
+--- slots 2-4 as sensor.window_1 .. window_3 (as the module's own page reads
+--- them). A list under sensor.window, or window1..window4, is accepted too.
 function Status.windows(data)
   local list, seen = {}, {}
   local function add(w)
@@ -224,7 +225,11 @@ function Status.windows(data)
       if mac then
         seen[mac] = true
       end
-      table.insert(list, { open = lower(w.state) == "open", battery = Status.number(w.batt), mac = mac, name = w.name })
+      local battery = Status.number(w.batt)
+      if battery then
+        battery = math.max(0, math.min(100, math.floor(battery + 0.5)))
+      end
+      table.insert(list, { open = lower(w.state) == "open", battery = battery, mac = mac, name = w.name })
     end
   end
   local w = Status.get(data, "sensor.window")
@@ -238,6 +243,7 @@ function Status.windows(data)
     end
   end
   for i = 1, 4 do
+    add(Status.get(data, "sensor.window_" .. i))
     add(Status.get(data, "sensor.window" .. i))
   end
   return list
