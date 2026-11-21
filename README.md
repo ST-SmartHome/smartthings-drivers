@@ -20,7 +20,8 @@ cloud dependency once set up.
 - **[panasonic-climacontrol-driver](panasonic-climacontrol-driver/)**
   (`panasonic-climacontrol-lan`) — Panasonic air conditioners fitted with
   ProtoART's ClimateControl module, over its local HTTP API, mDNS
-  auto-discovered. First version, not yet tested on a real module.
+  auto-discovered, with ProtoART's wireless thermometer and window/door
+  sensors.
 
 Each has its own `README.md` (technical details, setup).
 
