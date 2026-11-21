@@ -39,6 +39,8 @@ The module reports every Panasonic extra whether or not the indoor unit has it, 
 - **The *Unit features* setting:** All extras, nanoe X models, Eco Navi models or Basic (no Eco Navi, nanoe X, Mild Dry or left/right louvres).
 - **Learning:** a unit that doesn't support a setting puts it back by itself, usually within 10–30 s. After a command the driver reads the status every 5 s for a minute. If Eco, Eco Navi, nanoe X, Mild Dry, Vane Left/Right or Heat is put back to its previous value twice, it's hidden on that unit. It only learns while the unit is on, no window is open and no other setting changes in the meantime (a preset change can cancel Eco, for example). A failed command never counts, and a setting that holds for a minute clears the count. Changing *Unit features* forgets what was learned.
 
+Some older units silently accept a feature they don't have (for example Eco Navi) and never put it back, so learning can't catch it: use *Unit features* for those. Some older units also don't report power or room temperature over CN-CNT; the tiles then show 0 W or a fixed value.
+
 Vane Up/Down, Presets and Fan Speed always show all their options.
 
 ## Sensors
