@@ -42,12 +42,22 @@ local THERMO_PROFILE = "climacontrol-panasonic-thermometer.v1"
 local FEATURE_SETS = { all = true, nanoex = true, econavi = true, basic = true }
 -- What each feature set hides. "minimal" (Basic without Eco) is never a
 -- setting: it's used when the unit itself rejected Eco.
+-- What each feature set's PROFILE leaves out (profile names; never change,
+-- devices use them).
 local HIDES = {
   all = {},
   nanoex = { econavi = true, milddry = true },
   econavi = { nanoex = true, milddry = true },
   basic = { econavi = true, nanoex = true, milddry = true, widevane = true },
   minimal = { econavi = true, nanoex = true, milddry = true, widevane = true, eco = true },
+}
+-- What each "Unit features" choice hides. Basic leaves the left/right vane to
+-- learning (units without louvres refuse it), so it also suits units that have it.
+local SETTING_HIDES = {
+  all = HIDES.all,
+  nanoex = HIDES.nanoex,
+  econavi = HIDES.econavi,
+  basic = { econavi = true, nanoex = true, milddry = true },
 }
 local SET_ORDER = { "all", "nanoex", "econavi", "basic", "minimal" }
 local AUTH_FIELD = "needs_password"
@@ -291,7 +301,7 @@ end
 --- what the unit itself rejected.
 wanted_hidden = function(device)
   local hidden = {}
-  for k in pairs(HIDES[get_settings(device).features]) do
+  for k in pairs(SETTING_HIDES[get_settings(device).features]) do
     hidden[k] = true
   end
   for _, k in ipairs(EXTRAS) do
@@ -302,9 +312,9 @@ wanted_hidden = function(device)
   return hidden
 end
 
---- Remember a command whose result is judged over the next ~30 s.
---- Only while the unit is on and no window is open (the window function
---- overrides settings), and never for "off".
+--- Remember a command whose result is judged over the next minute.
+--- Only while the unit is on in Cool or Heat and no window is open (the window
+--- function overrides settings), and never for "off".
 local function expect(device, key, value, before)
   local last = device:get_field(LAST_FIELD) or {}
   local pending = device:get_field(PENDING_FIELD) or {}
@@ -313,7 +323,10 @@ local function expect(device, key, value, before)
   for _, w in ipairs(last.windows or {}) do
     window_open = window_open or w.open
   end
-  if before ~= nil and before ~= value and not window_open then
+  -- Extras are only judged in Cool or Heat: a unit may refuse e.g. Eco in Auto,
+  -- Dry or Fan mode although it has it, which would hide a working switch.
+  local mode_ok = key == "heat" or last.mode == "cool" or last.mode == "heat"
+  if before ~= nil and before ~= value and not window_open and mode_ok then
     -- The other settings at the time: if one changes (another command, the
     -- remote, the module's page), a put-back may be that change's doing
     -- (e.g. Powerful cancelling Eco), so the check is dropped.
