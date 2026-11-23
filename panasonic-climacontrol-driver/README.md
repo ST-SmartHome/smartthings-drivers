@@ -45,7 +45,7 @@ Vane Up/Down, Presets and Fan Speed always show all their options.
 
 ## Sensors
 
-ProtoART's wireless thermometer and window/door sensors are Bluetooth sensors paired to the module on its web page; SmartThings sees them through the module. With the CN-TH cable fitted, the air conditioner uses the thermometer in place of its own sensor (Temperature Input "Wireless"). If it stays "Internal" with a thermometer paired, the module couldn't calibrate the input: check the CN-TH cable (Panasonic units use 4-pin or 6-pin ones).
+ProtoART's wireless thermometer and window/door sensors (the window/door sensor is a MOES ZSS-GWM-C) are Bluetooth sensors paired to the module on its web page; SmartThings sees them through the module. With the CN-TH cable fitted, the air conditioner uses the thermometer in place of its own sensor (Temperature Input "Wireless"). If it stays "Internal" with a thermometer paired, the module couldn't calibrate the input: check the CN-TH cable (Panasonic units use 4-pin or 6-pin ones).
 
 A sensor's component, or child device, goes away (or offline) after 3 polls in a row without it. A child device you delete isn't added again until the next Scan nearby.
 
