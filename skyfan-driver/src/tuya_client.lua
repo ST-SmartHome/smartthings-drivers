@@ -186,12 +186,11 @@ end
 
 --- Sets one or more DPs. `dps` is a table like {["1"] = true, ["3"] = 4}.
 --- Uses the older CONTROL command (0x07), not CONTROL_NEW (0x0D) — confirmed
---- 2026-08-20 this fan's firmware silently drops every CONTROL_NEW request
+--- 2026-08-20 that Skyfan DC firmware silently drops every CONTROL_NEW request
 --- (TCP-acks it, never sends an application response) regardless of framing,
 --- but responds normally to CONTROL. Root-caused via a standalone reference
 --- implementation (jasonacox/tinytuya) succeeding against the same device
---- where this driver's original CONTROL_NEW send did not; see
---- skyfan-driver-project-status memory for the full investigation. Paired
+--- where this driver's original CONTROL_NEW send did not. Paired
 --- with the encode()-side header fix in tuya_protocol.lua — both were
 --- required together, neither alone was sufficient.
 local function set_dps33(ip, local_key, device_id, dps, timeout_sec)

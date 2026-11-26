@@ -42,8 +42,7 @@ local VALID_WORK_MODES = {Warmwhite = true, Naturalwhite = true, Coolwhite = tru
 -- automatic here for every fan with a physical light, including ones
 -- added in the future — confirmed working end-to-end on this driver's
 -- own Tuya/DPS write path specifically, not just carried over from
--- bigassfans-driver's confirmation. See skyfan-driver-project-status
--- memory for the pilot's test results.
+-- bigassfans-driver's confirmation.
 local LIGHT_CHILD_DNI_SUFFIX = "-light"
 local LIGHT_CHILD_PROFILE = "skyfan-light-child.v1"
 
@@ -358,9 +357,9 @@ end
 
 -- ===== Resilient writes (2026-09-25) =====
 --
--- Measured 2026-09-25: with no commands being sent at all, about 27% of
--- status queries across the fleet failed with "Connection reset by peer"
--- (13 of 48 in a 3-minute window, spread over at least 5 fans). A write
+-- Measured 2026-09-25: with no commands being sent at all, roughly a
+-- quarter of status queries on a lossy 2.4 GHz link failed with
+-- "Connection reset by peer", across several fans. A write
 -- goes over the same one-shot connection, and send_dp used to send once
 -- and give up, so roughly one command in four could be silently lost --
 -- e.g. an Alexa group "turn off the lights" reaching only one of two fans.
@@ -562,8 +561,8 @@ local NO_LIGHT_NO_ADDFAN_PROFILE = "skyfan-dc-no-light-no-addfan.v2"
 -- 2026-09-02: persisted once ensure_light_child's live DP probe (see below)
 -- positively confirms a fan has no light hardware, so profile_for treats
 -- it as no_light on every subsequent device_init too -- there's no
--- preference-write path to set `noLight` itself (see
--- smartthings-edge-driver-gotchas memory), so this field is the only way
+-- preference-write path to set `noLight` itself (drivers can't write
+-- preferences), so this field is the only way
 -- an automatic detection can actually stick.
 local PROBED_NO_LIGHT_FIELD = "probed_no_light"
 
@@ -580,7 +579,7 @@ local PROBED_NO_LIGHT_FIELD = "probed_no_light"
 --- no light hardware, persisted via PROBED_NO_LIGHT_FIELD since there's no
 --- way to actually write the noLight preference itself. Deliberately does
 --- NOT write the noLight preference itself (no preference-write path
---- exists — see smartthings-edge-driver-gotchas memory); this only
+--- exists for drivers); this only
 --- affects which profile ensure_correct_profile picks.
 local function profile_for(device, has_light_child)
   local prefs = device.preferences or {}
@@ -600,8 +599,7 @@ local ACTIVE_PROFILE_FIELD = "active_profile"
 -- device.profile.id IS a real, comparable UUID (not the profile name
 -- string) — these are this driver's actual current deviceIntegrationProfile
 -- UUIDs, confirmed directly via the REST API. Comparing device.profile.id
--- against a NAME string is always true and unsafe (see
--- smartthings-edge-driver-gotchas memory) — but comparing it against its
+-- against a NAME string is always true and unsafe — but comparing it against its
 -- own real UUID is meaningful and is the only reliable source of truth for
 -- what profile a device is *actually* on right now.
 -- A renamed profile gets a new UUID: update these with every rename,
@@ -779,8 +777,7 @@ local function device_init(driver, device)
   end
   -- Also covers migrating devices provisioned under an older with-light
   -- profile name — same
-  -- pattern/reasoning as the SolarEdge driver's migration, see
-  -- smartthings-edge-driver-gotchas memory.
+  -- pattern/reasoning as the SolarEdge driver's migration.
   ensure_correct_profile(driver, device)
   -- Never delete at init: a noLight left on from older builds (where it
   -- was harmless alongside a light child) would silently delete real

@@ -317,9 +317,9 @@ end
 
 -- ===== Resilient writes (2026-09-25) =====
 --
--- Measured 2026-09-25: with no commands being sent at all, about 27% of
--- status queries across the fleet failed with "Connection reset by peer"
--- (13 of 48 in a 3-minute window, spread over at least 5 fans). A write
+-- Measured 2026-09-25: with no commands being sent at all, roughly a
+-- quarter of status queries on a lossy 2.4 GHz link failed with
+-- "Connection reset by peer", across several fans. A write
 -- goes over the same one-shot connection, and send_dp used to send once
 -- and give up, so roughly one command in four could be silently lost --
 -- e.g. an Alexa group "turn off the lights" reaching only one of two fans.

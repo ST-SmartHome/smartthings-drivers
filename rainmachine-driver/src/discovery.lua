@@ -11,7 +11,7 @@
 local log = require "log"
 local mdns = require "st.mdns"
 
-local PROFILE = "rainmachine-controller.v5"
+local PROFILE = "rainmachine-controller.v6"   -- must match CONTROLLER_PROFILE in init.lua
 local DNI_PREFIX = "rainmachine-"
 local FIRST_DEVICE_NETWORK_ID = "rainmachine-1"
 

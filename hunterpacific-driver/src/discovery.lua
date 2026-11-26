@@ -10,11 +10,10 @@
 --- driver's own discovery_handler — decrypting it with Tuya's known fixed
 --- key — was built and tested on 2026-08-05, then reverted: SmartThings
 --- Edge Drivers can only bind UDP sockets to port 0 (a platform
---- restriction, confirmed live on this hub and independently via the
---- SmartThings community), and Tuya's broadcast targets fixed protocol
---- ports (6666/6667) the driver has no ability to claim. Not fixable —
---- see smartthings-edge-driver-gotchas memory. Don't re-attempt this
---- without re-reading that entry first.)
+--- restriction, confirmed on a real hub and by the SmartThings
+--- community), and Tuya's broadcast targets fixed protocol ports
+--- (6666/6667) the driver has no ability to claim. Not fixable on the
+--- current platform, so don't re-attempt it.)
 ---
 --- How many fans: earlier versions tried a fixed single device, then a
 --- bounded pool of numbered slots (both rejected — see git history/session

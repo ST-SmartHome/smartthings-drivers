@@ -23,16 +23,16 @@ local INVERTER_MODEL_IDS = { [101] = true, [102] = true, [103] = true }
 -- 201 (single phase), 202 (split phase), 203 (wye three phase), 204 (delta
 -- three phase) — an optional SolarEdge production/consumption meter (e.g.
 -- SE-RGMTR-1D-240C-A) that's a separate SunSpec model in the chain, present
--- only if physically installed. Confirmed present and readable on this
--- system (reports as 203 despite being a single-phase residential
--- installation — SolarEdge's own meter firmware appears to always report
--- 203 regardless of actual wiring; not evidence of a 3-phase installation).
+-- only if physically installed. A single-phase SolarEdge meter has been
+-- seen reporting as 203 (SolarEdge's meter firmware appears to report 203
+-- regardless of actual wiring), so 203 alone is not evidence of a 3-phase
+-- installation.
 local METER_MODEL_IDS = { [201] = true, [202] = true, [203] = true, [204] = true }
 
 -- Offsets relative to the METER model's data start (right after its own
 -- 2-register ID+Length header — confirmed empirically at wire register 190,
--- matching the doc's absolute "40190 M_AC_Current" exactly for this
--- installation's default single-meter addressing).
+-- matching the doc's absolute "40190 M_AC_Current" exactly with the
+-- default single-meter addressing).
 local METER_OFFSET = {
   AC_POWER = 17,     -- relative 16. Signed: negative = importing from grid
   AC_POWER_SF = 21,  -- (consuming), positive = exporting — confirmed via a
@@ -77,7 +77,7 @@ local OFFSET = {
   -- SunSpec defines four temperature slots (Cabinet/Sink/Transformer/Other);
   -- vendors commonly only populate one, leaving the rest at the "not
   -- implemented" sentinel (raw 0x8000 / -32768). Read all four and use
-  -- whichever actually has data — on this SE5000AU, TmpCab itself came back
+  -- whichever actually has data — on an SE5000AU, TmpCab itself came back
   -- as the sentinel (confirmed: -327.68 = -32768 * 10^-2 exactly).
   TEMP_CAB = 32,   -- relative 31
   TEMP_SNK = 33,   -- relative 32

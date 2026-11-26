@@ -1,7 +1,7 @@
 --- Walks the SunSpec model chain to find the actual register address of a
 --- given model, instead of assuming a fixed address. This replaces the
---- earlier hardcoded "documented 40069" guess, which turned out wrong for
---- this specific inverter (readings came back as reserved/sentinel values —
+--- earlier hardcoded "documented 40069" guess, which turned out wrong on
+--- a real inverter (readings came back as reserved/sentinel values —
 --- 0x8000, NaN-producing scale factors — a classic "wrong register block"
 --- symptom, not a math bug).
 ---
