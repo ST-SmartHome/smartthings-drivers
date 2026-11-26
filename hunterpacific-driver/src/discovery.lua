@@ -68,7 +68,9 @@ function Discovery.discovery_handler(driver, opts, cons)
   log.info("Hunter Pacific fan discovery started (manual creation, not network-gated)")
 
   for _, device in ipairs(driver:get_devices()) do
-    if device.device_network_id:sub(1, #"hunterpacific-tuya-") == "hunterpacific-tuya-" then
+    local dni = device.device_network_id
+    -- Fans only: a light device ("...-light") left behind isn't a fan.
+    if dni:sub(1, #"hunterpacific-tuya-") == "hunterpacific-tuya-" and dni:sub(-6) ~= "-light" then
       log.info("A Hunter Pacific fan device already exists — not creating another automatically (use the 'Add another fan' button for that)")
       return
     end

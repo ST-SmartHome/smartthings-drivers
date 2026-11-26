@@ -62,6 +62,11 @@ function Modbus:read_holding_registers(start_addr, quantity)
     if proto_id ~= 0x0000 then
       return nil, "unexpected protocol id: " .. tostring(proto_id)
     end
+    -- At least unit id, function code and one more byte; a smaller length
+    -- would read nothing (or ask receive for a negative count).
+    if length < 3 then
+      return nil, "Modbus reply header too short (length " .. tostring(length) .. ")"
+    end
 
     local body, pdu_err = self.sock:receive(length - 1)
     if not body then

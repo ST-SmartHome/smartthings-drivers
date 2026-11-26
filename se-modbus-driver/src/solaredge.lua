@@ -119,6 +119,26 @@ local function phase_voltage(regs, value_offset, sf_offset)
   return scaled_unsigned16(regs, value_offset, sf_offset)
 end
 
+--- The same, but nil for SunSpec's "not implemented" values (int16 0x8000,
+--- uint16 0xFFFF): scaled, those show as large bogus readings (-327.68 W).
+local function signed16_or_nil(regs, value_offset, sf_offset)
+  if regs[value_offset] == 0x8000 then
+    return nil
+  end
+  return scaled_signed16(regs, value_offset, sf_offset)
+end
+
+local function unsigned16_or_nil(regs, value_offset, sf_offset)
+  if regs[value_offset] == 0xFFFF then
+    return nil
+  end
+  return scaled_unsigned16(regs, value_offset, sf_offset)
+end
+
+local function abs_or_nil(v)
+  return v and math.abs(v) or nil
+end
+
 local function scaled_u32(regs, hi_offset, lo_offset, sf_offset)
   return Modbus.apply_scale_factor(Modbus.registers_to_u32(regs[hi_offset], regs[lo_offset]), regs[sf_offset])
 end
@@ -174,22 +194,28 @@ local function uint32_le(regs, idx)
   return (hi << 16) | lo
 end
 
---- Reads battery 1 over an already-open session. Returns a table, or nil
---- when no battery is present (Modbus exception on this range, or a zero /
---- not-implemented rated energy, which is how SolarEdge reports "no
---- battery"). Never raises.
+--- Reads battery 1 over an already-open session. Returns the battery table,
+--- or nil plus "absent" (a clean "no battery": a Modbus exception on this
+--- range, or a zero / not-implemented rated energy, which is how SolarEdge
+--- reports it) or "error" (a failed or garbled read, which says nothing
+--- either way). Only "absent" counts towards removing the battery section.
+--- Never raises.
 local function read_battery(client)
   local regs, err = client:read_holding_registers(BATTERY1_READ_START, BATTERY_READ_COUNT)
   if not regs then
     log.debug("SolarEdge: no battery block (" .. tostring(err) .. ")")
-    return nil
+    return nil, tostring(err):find("exception", 1, true) and "absent" or "error"
   end
   local rated = float32_le(regs, BATT_IDX.RATED_ENERGY)
-  -- A real battery's rated energy is roughly 1-200 kWh. Anything else is
-  -- "no battery" or a garbled read (one after a driver update once put a
-  -- battery-less inverter on the battery profile, 2026-10-10).
-  if not rated or rated < 1000 or rated > 200000 then
-    return nil
+  -- A real battery's rated energy is roughly 1-200 kWh. Zero or "not
+  -- implemented" means no battery; any other value outside that range is a
+  -- garbled read (one after a driver update once put a battery-less
+  -- inverter on the battery profile, 2026-10-10).
+  if not rated or rated == 0 then
+    return nil, "absent"
+  end
+  if rated < 1000 or rated > 200000 then
+    return nil, "error"
   end
   local status = uint32_le(regs, BATT_IDX.STATUS)
   local soe = float32_le(regs, BATT_IDX.SOE)
@@ -255,7 +281,9 @@ function SolarEdge.read(ip, port, unit_id, timeout_sec)
   -- again from address 2 -- model_addr is already that model's DATA start
   -- (post-header), so its own data occupies exactly model_length
   -- registers from there; the next model's header starts right after.
-  local meter_addr, meter_length = SunSpec.find_model(client, METER_MODEL_IDS, model_addr + model_length)
+  -- The meter at the grid connection ("Export+Import"), not just the first
+  -- meter: a site can also have consumption or production meters.
+  local meter_addr, meter_length, _, meter_role = SunSpec.find_grid_meter(client, METER_MODEL_IDS, model_addr + model_length)
   local meter_regs = nil
   if meter_addr and meter_length >= METER_READ_COUNT then
     local meter_read_err
@@ -272,14 +300,15 @@ function SolarEdge.read(ip, port, unit_id, timeout_sec)
   end
   -- Battery is optional hardware, read in the same single session for the
   -- same one-connection-at-a-time reason as the meter. Read-only.
-  local battery = read_battery(client)
+  local battery, battery_state = read_battery(client)
   client:close()
 
-  local power_w = scaled_signed16(regs, OFFSET.AC_POWER, OFFSET.AC_POWER_SF)
+  -- nil = "not implemented" (e.g. while the inverter wakes up): not shown.
+  local power_w = signed16_or_nil(regs, OFFSET.AC_POWER, OFFSET.AC_POWER_SF)
   local energy_wh = scaled_u32(regs, OFFSET.AC_ENERGY_WH_HI, OFFSET.AC_ENERGY_WH_LO, OFFSET.AC_ENERGY_WH_SF)
-  local dc_current_a = scaled_unsigned16(regs, OFFSET.DC_CURRENT, OFFSET.DC_CURRENT_SF)
-  local dc_voltage = scaled_unsigned16(regs, OFFSET.DC_VOLTAGE, OFFSET.DC_VOLTAGE_SF)
-  local dc_power_w = scaled_signed16(regs, OFFSET.DC_POWER, OFFSET.DC_POWER_SF)
+  local dc_current_a = unsigned16_or_nil(regs, OFFSET.DC_CURRENT, OFFSET.DC_CURRENT_SF)
+  local dc_voltage = unsigned16_or_nil(regs, OFFSET.DC_VOLTAGE, OFFSET.DC_VOLTAGE_SF)
+  local dc_power_w = signed16_or_nil(regs, OFFSET.DC_POWER, OFFSET.DC_POWER_SF)
 
   local temp_sf = regs[OFFSET.TEMP_SF]
   local temp_c = nil
@@ -305,26 +334,27 @@ function SolarEdge.read(ip, port, unit_id, timeout_sec)
     local vc = phase_voltage(meter_regs, METER_OFFSET.PHV_C, METER_OFFSET.V_SF)
     if vb > THREE_PHASE_MIN_V and vc > THREE_PHASE_MIN_V and vb < 1000 and vc < 1000 then
       grid_phases = {
+        -- nil entries: "not implemented" on that phase (not shown).
         power = {
-          scaled_signed16(meter_regs, METER_OFFSET.W_A, METER_OFFSET.AC_POWER_SF),
-          scaled_signed16(meter_regs, METER_OFFSET.W_B, METER_OFFSET.AC_POWER_SF),
-          scaled_signed16(meter_regs, METER_OFFSET.W_C, METER_OFFSET.AC_POWER_SF),
+          signed16_or_nil(meter_regs, METER_OFFSET.W_A, METER_OFFSET.AC_POWER_SF),
+          signed16_or_nil(meter_regs, METER_OFFSET.W_B, METER_OFFSET.AC_POWER_SF),
+          signed16_or_nil(meter_regs, METER_OFFSET.W_C, METER_OFFSET.AC_POWER_SF),
         },
         voltage = { va, vb, vc },
         -- Magnitude only; the power sign carries the direction.
         current = {
-          math.abs(scaled_signed16(meter_regs, METER_OFFSET.A_A, METER_OFFSET.A_SF)),
-          math.abs(scaled_signed16(meter_regs, METER_OFFSET.A_B, METER_OFFSET.A_SF)),
-          math.abs(scaled_signed16(meter_regs, METER_OFFSET.A_C, METER_OFFSET.A_SF)),
+          abs_or_nil(signed16_or_nil(meter_regs, METER_OFFSET.A_A, METER_OFFSET.A_SF)),
+          abs_or_nil(signed16_or_nil(meter_regs, METER_OFFSET.A_B, METER_OFFSET.A_SF)),
+          abs_or_nil(signed16_or_nil(meter_regs, METER_OFFSET.A_C, METER_OFFSET.A_SF)),
         },
       }
     end
     grid_phase_one = {
-      power = scaled_signed16(meter_regs, METER_OFFSET.W_A, METER_OFFSET.AC_POWER_SF),
+      power = signed16_or_nil(meter_regs, METER_OFFSET.W_A, METER_OFFSET.AC_POWER_SF),
       voltage = va,
-      current = math.abs(scaled_signed16(meter_regs, METER_OFFSET.A_A, METER_OFFSET.A_SF)),
+      current = abs_or_nil(signed16_or_nil(meter_regs, METER_OFFSET.A_A, METER_OFFSET.A_SF)),
     }
-    grid_power_w = scaled_signed16(meter_regs, METER_OFFSET.AC_POWER, METER_OFFSET.AC_POWER_SF)
+    grid_power_w = signed16_or_nil(meter_regs, METER_OFFSET.AC_POWER, METER_OFFSET.AC_POWER_SF)
     grid_exported_wh = scaled_u32(meter_regs, METER_OFFSET.EXPORTED_HI, METER_OFFSET.EXPORTED_LO, METER_OFFSET.ENERGY_SF)
     grid_imported_wh = scaled_u32(meter_regs, METER_OFFSET.IMPORTED_HI, METER_OFFSET.IMPORTED_LO, METER_OFFSET.ENERGY_SF)
   end
@@ -343,6 +373,9 @@ function SolarEdge.read(ip, port, unit_id, timeout_sec)
     grid_exported_wh = grid_exported_wh,
     grid_imported_wh = grid_imported_wh,
     battery = battery,
+    battery_state = battery and "present" or battery_state, -- "present" / "absent" / "error"
+    meter_read = meter_regs ~= nil, -- a meter was read this time (phase detection counts only these)
+    meter_role = meter_regs and meter_role or nil, -- the meter's own role text, e.g. "Export+Import"
     grid_phases = grid_phases, -- nil unless the meter shows real voltage on phases B and C
     grid_phase_one = grid_phase_one, -- L1 power/voltage/current whenever a meter is read
   }

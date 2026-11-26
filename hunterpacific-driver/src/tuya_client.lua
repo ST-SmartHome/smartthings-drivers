@@ -1,4 +1,4 @@
---- Connects to a Skyfan DC over its local Tuya TCP port (6668), sends one
+--- Connects to a Hunter Pacific fan over its local Tuya TCP port (6668), sends one
 --- framed command, reads the response, and closes. One connection per
 --- request rather than a held-open session — simpler and more robust to
 --- reason about in an Edge Driver's cooperative-scheduling model, same
@@ -148,7 +148,23 @@ function TuyaClient.send(ip, local_key, command, payload_table, timeout_sec)
     return nil, "send failed: " .. tostring(send_err)
   end
 
-  local frame, read_err = read_frame(sock)
+  -- A status query's reply can be preceded by an unsolicited status push
+  -- (0x08, e.g. someone using the remote just then) carrying only the DPs
+  -- that changed: skip frames that aren't the reply, up to a few. Other
+  -- commands keep the first frame (a CONTROL may be answered by a push).
+  local frame, read_err
+  for _ = 1, 4 do
+    frame, read_err = read_frame(sock)
+    if not frame or command ~= Tuya.COMMAND.DP_QUERY then
+      break
+    end
+    local reply_command = #frame >= 12 and string.unpack(">I4", frame, 9) or nil
+    if reply_command == command then
+      break
+    end
+    log.debug("Hunter Pacific fan at " .. ip .. ": skipping a " .. tostring(reply_command) .. " frame while waiting for the status reply")
+    frame, read_err = nil, "no status reply (only other frames)"
+  end
   sock:close()
   if not frame then
     return nil, read_err
@@ -173,13 +189,26 @@ local function query_status33(ip, local_key, device_id, timeout_sec)
   log.info("Hunter Pacific fan raw response: command=" .. tostring(response.command) ..
     " payload=" .. tostring(response.payload) .. " (type " .. type(response.payload) .. ")")
 
+  -- Only an undecodable reply points at the key; an ACK or an empty reply
+  -- is just a reply that isn't a status (retried like a network failure).
+  if type(response.payload) == "string" then
+    local text = response.payload
+    if text:find("[\0-\8\14-\31\127-\255]") then
+      return nil, "decrypt failed: garbled reply (wrong local key?)"
+    end
+    local lower = text:lower()
+    if lower:find("unvalid", 1, true) or lower:find("invalid", 1, true) then
+      return nil, "fan rejected the request (wrong Device ID?): " .. text:sub(1, 60)
+    end
+    return nil, "reply was not a status (" .. text:sub(1, 40) .. ")"
+  end
   if type(response.payload) ~= "table" then
-    return nil, "response payload was not a table (got " .. type(response.payload) .. ": " .. tostring(response.payload) .. ")"
+    return nil, "reply was not a status (" .. type(response.payload) .. ")"
   end
 
   local dps = response.payload.dps
   if not dps then
-    return nil, "response had no dps field"
+    return nil, "reply had no status data"
   end
   return dps
 end
@@ -241,6 +270,11 @@ function TuyaClient.query_status(ip, local_key, device_id, timeout_sec)
       return dps35
     end
     log.debug("3.5 attempt at " .. ip .. " failed too: " .. tostring(err35))
+    -- The fan answered the 3.5 handshake but its HMAC didn't verify: a 3.5
+    -- fan with the wrong local key, not a network problem.
+    if not handshake_ok and tostring(err35):find("HMAC", 1, true) then
+      return nil, err35
+    end
   end
   return nil, err
 end

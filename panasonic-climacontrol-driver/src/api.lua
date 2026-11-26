@@ -20,11 +20,15 @@ local Api = {}
 
 local sessions = {}   -- ip -> "session=..." cookie
 local logged_in_at = {}   -- ip -> os.time() of the last login
--- ip -> { until_time, error, kind }: no login attempts until then. Set after a
--- wrong password (so it isn't retried on every poll) and when the session is
--- lost again right after logging in, i.e. someone is using the module's own
--- web page (one login at a time): logging in again would log them out.
+-- ip -> { until_time, error, kind }: no login attempts until then. Set when the
+-- session is lost again right after logging in, i.e. someone is using the
+-- module's own web page (one login at a time): logging in again would log
+-- them out.
 local blocked = {}
+-- ip -> { [password] = until_time }: that password was wrong, so it isn't
+-- retried on every poll. Kept per password, so a wrong one (e.g. another
+-- module's, tried during a scan) never holds back the right one.
+local wrong_until = {}
 local WRONG_PASSWORD_WAIT = 300
 local PAGE_IN_USE_WAIT = 180
 local RELOGIN_TOO_SOON = 60
@@ -107,6 +111,10 @@ local function get(ip, path, password)
       return nil, b[2], b[3]
     end
     blocked[ip] = nil
+    local w = wrong_until[ip] and wrong_until[ip][password]
+    if w and now < w then
+      return nil, "login: wrong password (check the device's Settings)", "auth"
+    end
     if logged_in_at[ip] and now - logged_in_at[ip] < RELOGIN_TOO_SOON then
       blocked[ip] = { now + PAGE_IN_USE_WAIT, "the module's web page is in use (one login at a time); trying again later", "busy" }
       logged_in_at[ip] = nil
@@ -115,10 +123,12 @@ local function get(ip, path, password)
     local ok, err = Api.login(ip, password)
     if not ok then
       if err == "wrong password" then
-        blocked[ip] = { now + WRONG_PASSWORD_WAIT, "login: wrong password (check the device's Settings)", "auth" }
+        wrong_until[ip] = wrong_until[ip] or {}
+        wrong_until[ip][password] = now + WRONG_PASSWORD_WAIT
       end
       return nil, "login: " .. tostring(err), "auth"
     end
+    wrong_until[ip] = nil
     body, code = raw_get(ip, path)
     if code == 401 then
       return nil, "not accepted after login", "auth"
@@ -143,9 +153,9 @@ end
 --- Forget a module's session (e.g. after its password setting changed).
 function Api.forget(ip)
   if ip then
-    sessions[ip], blocked[ip], logged_in_at[ip] = nil, nil, nil
+    sessions[ip], blocked[ip], logged_in_at[ip], wrong_until[ip] = nil, nil, nil, nil
   else
-    sessions, blocked, logged_in_at = {}, {}, {}
+    sessions, blocked, logged_in_at, wrong_until = {}, {}, {}, {}
   end
 end
 

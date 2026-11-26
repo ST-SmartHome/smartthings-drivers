@@ -73,4 +73,65 @@ function SunSpec.find_model(client, target_model_ids, resume_addr)
   return nil, "scanned " .. MAX_MODELS_TO_SCAN .. " models without finding a match or end marker — giving up"
 end
 
+--- Text from a run of registers (two ASCII bytes each, high byte first),
+--- with trailing NULs and spaces removed.
+local function registers_to_text(regs)
+  local bytes = {}
+  for _, r in ipairs(regs) do
+    bytes[#bytes + 1] = string.char((r >> 8) & 0xFF, r & 0xFF)
+  end
+  return (table.concat(bytes):gsub("[%z%s]+$", ""))
+end
+SunSpec._registers_to_text = registers_to_text
+
+-- In a Common (model 1) block, C_Option is 8 registers at data offset 32.
+-- SolarEdge meters put their role there: "Export+Import", "Consumption",
+-- "Production" (as Home Assistant's solaredge-modbus-multi reads it).
+local COMMON_MODEL_ID = 1
+local OPTION_OFFSET = 32
+local OPTION_LENGTH = 8
+
+--- Walks the rest of the chain from `resume_addr` and returns the meter
+--- that measures the grid connection: the first meter model whose own
+--- Common block says "Export" in its option, else the first meter found
+--- (the old behaviour). Returns data address, length, model id and role
+--- text (nil if unreadable), or nil + error when there's no meter.
+function SunSpec.find_grid_meter(client, meter_model_ids, resume_addr)
+  local addr = resume_addr
+  local common_addr = nil
+  local first = nil
+  for _ = 1, MAX_MODELS_TO_SCAN do
+    local model_header, mh_err = client:read_holding_registers(addr, 2)
+    if not model_header then
+      if first then
+        break -- keep the meter already found
+      end
+      return nil, "failed reading model header at wire " .. addr .. ": " .. tostring(mh_err)
+    end
+    local model_id, model_length = model_header[1], model_header[2]
+    if model_id == END_MODEL_ID then
+      break
+    end
+    if model_id == COMMON_MODEL_ID then
+      common_addr = addr + 2
+    elseif meter_model_ids[model_id] then
+      local role = nil
+      if common_addr then
+        local opt = client:read_holding_registers(common_addr + OPTION_OFFSET, OPTION_LENGTH)
+        role = opt and registers_to_text(opt) or nil
+      end
+      local meter = { addr = addr + 2, length = model_length, id = model_id, role = role }
+      if role and role:lower():find("export", 1, true) then
+        return meter.addr, meter.length, meter.id, role
+      end
+      first = first or meter
+    end
+    addr = addr + 2 + model_length
+  end
+  if first then
+    return first.addr, first.length, first.id, first.role
+  end
+  return nil, "no meter model in the SunSpec chain"
+end
+
 return SunSpec

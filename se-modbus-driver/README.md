@@ -19,9 +19,9 @@ Community thread: https://community.smartthings.com/t/st-edge-driver-solaredge-p
 | DC Input | DC power, plus one row with DC voltage and current |
 | Battery (if a SolarEdge-connected battery is fitted) | Power (+ charging / − discharging), temperature, Battery Status on its own line, and a Battery Storage row with charge level, health and energy available. Read-only |
 
-Grid power already accounts for household use, so use it, not inverter output, for "solar surplus" Routines. Installs without a meter just don't show the Grid section.
+Grid power already accounts for household use, so use it, not inverter output, for "solar surplus" Routines. Installs without a meter just don't show the Grid section. With more than one meter (e.g. consumption or production meters as well), the Grid section uses the meter that SolarEdge marks "Export+Import", the one at the grid connection; if no meter reports a role, the first meter is used.
 
-The driver detects a three-phase meter (real voltage on L2 and L3) and a battery on its own, and switches the device's layout when it finds them. A battery must be read on 3 polls in a row before the Battery section and header battery icon appear, and they're removed again after 60 polls in a row (about 30 minutes) without one. Single-phase sites show one phase row. Phase current is measured by the meter and shown without a sign; the power sign gives the direction.
+The driver detects a three-phase meter (real voltage on L2 and L3) and a battery on its own, and switches the device's layout when it finds them. A battery or three-phase meter must be read on 3 polls in a row before its rows appear (the Battery section and header battery icon, or the L2 and L3 rows). They're removed again only after 24 hours in which the inverter reports no battery, or the meter shows no voltage on L2 and L3. Failed reads don't count, so a sleeping battery or a dropped connection doesn't remove anything. Single-phase sites show one phase row. Phase current is measured by the meter and shown without a sign; the power sign gives the direction.
 
 On hybrid inverters with a battery, the DC voltage is the inverter's shared DC bus, not the panel or battery voltage.
 

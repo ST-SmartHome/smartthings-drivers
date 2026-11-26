@@ -730,10 +730,13 @@ local function poll_once(driver, device)
     if network_due then
       categories = { "FAN", "LIGHT", "SENSORS", "NETWORK", "FIRMWARE_MORE_DATETIME_API" }
     end
-    local results, err = BafClient.query_multi(ip, categories, 5)
+    -- The network categories are optional: a late or missing answer there
+    -- must not fail the fan/light/sensor update (it used to fail every poll).
+    local optional = { NETWORK = true, FIRMWARE_MORE_DATETIME_API = true }
+    local results, err = BafClient.query_multi(ip, categories, 5, optional)
     if not results then
       log.warn("BAF poll query failed for " .. ip .. " (retrying once): " .. tostring(err))
-      results, err = BafClient.query_multi(ip, categories, 5)
+      results, err = BafClient.query_multi(ip, categories, 5, optional)
     end
     if not results then
       log.error("BAF poll query failed for " .. ip .. " after retry: " .. tostring(err))
@@ -746,11 +749,14 @@ local function poll_once(driver, device)
     end
     apply_sleep_status(device, results.FAN, results.LIGHT)
     apply_comfort_cluster_status(device, results.FAN)
+    if network_due then
+      -- Counted as done even if unanswered: retried at the next interval,
+      -- not on every poll.
+      device:set_field("network_polled_at", os.time())
+    end
     if network_due and (results.NETWORK or results.FIRMWARE_MORE_DATETIME_API) then
       local ok_net, net_err = pcall(NetInfo.apply, device, results.NETWORK, results.FIRMWARE_MORE_DATETIME_API)
-      if ok_net then
-        device:set_field("network_polled_at", os.time())
-      else
+      if not ok_net then
         log.warn("BAF network info update failed for " .. ip .. ": " .. tostring(net_err))
       end
     end
@@ -1571,6 +1577,50 @@ end
 -- that finds a newer token gives up, so the last tap decides the direction.
 local DIRECTION = { MAX_STOP_ATTEMPTS = 3, TOKEN_FIELD = "direction_change_token" }
 
+--- Checks a committed direction, like verify_commit but for direction only:
+--- gives up when a newer direction request has arrived (so an older tap can
+--- never override a newer one), and only resends while the fan is still
+--- confirmed stopped (fan_mode OFF, speed 0), keeping the motor interlock
+--- on retries too. reverse_enable reads back late by design, so a few
+--- unconfirmed checks are normal; the regular poll shows the final value.
+function DIRECTION.verify(driver, device, ip, target_reverse, attempt, token)
+  local function superseded()
+    return device:get_field(DIRECTION.TOKEN_FIELD) ~= token
+  end
+  local ok, err = pcall(function()
+    if superseded() then
+      return
+    end
+    local results = BafClient.query_multi(ip, { "FAN" }, 5)
+    if superseded() then
+      return
+    end
+    local fan = results and results.FAN
+    if fan and fan.reverse_enable == target_reverse then
+      apply_fan_status(device, fan)
+      return
+    end
+    if attempt >= MAX_COMMIT_ATTEMPTS then
+      log.warn("BAF direction not confirmed after " .. attempt .. " checks; the next poll shows the fan's real direction")
+      poll_once(driver, device)
+      return
+    end
+    if fan and fan.fan_mode == baf.OFF_ON_AUTO.OFF and fan.speed == 0 then
+      BafClient.commit(ip, { reverse_enable = target_reverse }, 5)
+    elseif fan then
+      log.warn("BAF fan was turned on before its direction change was confirmed; not resending it (motor safety)")
+      poll_once(driver, device)
+      return
+    end
+    device.thread:call_with_delay(REFRESH_DELAY_SECONDS, function()
+      DIRECTION.verify(driver, device, ip, target_reverse, attempt + 1, token)
+    end)
+  end)
+  if not ok then
+    log.error("BAF direction verification crashed: " .. tostring(err))
+  end
+end
+
 --- Re-queries FAN and, once confirmed stopped (fan_mode OFF and speed 0),
 --- commits reverse_enable and hands off to the normal verify_commit path.
 --- Retries the stop commit up to MAX_STOP_ATTEMPTS times if the fan
@@ -1596,14 +1646,13 @@ local function verify_stopped_then_set_direction(driver, device, ip, target_reve
     local fan = results and results["FAN"]
     if fan and fan.fan_mode == baf.OFF_ON_AUTO.OFF and fan.speed == 0 then
       apply_fan_status(device, fan)
-      local props = { reverse_enable = target_reverse }
-      local committed, commit_err = BafClient.commit(ip, props, 5)
+      local committed, commit_err = BafClient.commit(ip, { reverse_enable = target_reverse }, 5)
       if not committed then
         log.error("BAF direction commit failed after confirming stopped: " .. tostring(commit_err))
         return
       end
       device.thread:call_with_delay(REFRESH_DELAY_SECONDS, function()
-        verify_commit(driver, device, ip, props, "FAN", 1)
+        DIRECTION.verify(driver, device, ip, target_reverse, 1, token)
       end)
       return
     end
@@ -1632,13 +1681,18 @@ local function set_direction(driver, device, command)
     return
   end
   local target_reverse = command.args.direction == "Reverse"
-  local token = (device:get_field(DIRECTION.TOKEN_FIELD) or 0) + 1
-  device:set_field(DIRECTION.TOKEN_FIELD, token)
   local stopped, err = BafClient.commit(ip, { fan_mode = baf.OFF_ON_AUTO.OFF }, 5)
   if not stopped then
+    -- An earlier tap still in progress carries on: a failed request
+    -- doesn't cancel it.
     log.error("BAF direction-change stop commit failed: " .. tostring(err))
+    poll_once(driver, device)
     return
   end
+  -- Taken only once the stop is sent, so a request that fails above never
+  -- supersedes an earlier one.
+  local token = (device:get_field(DIRECTION.TOKEN_FIELD) or 0) + 1
+  device:set_field(DIRECTION.TOKEN_FIELD, token)
   device.thread:call_with_delay(REFRESH_DELAY_SECONDS, function()
     verify_stopped_then_set_direction(driver, device, ip, target_reverse, 1, token)
   end)

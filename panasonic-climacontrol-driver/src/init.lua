@@ -40,10 +40,10 @@ local THERMO_PROFILE = "climacontrol-panasonic-thermometer.v1"
 -- "Unit features" setting -> the profiles without the extras that unit lacks
 -- (nanoe X, Eco Navi, Mild Dry, left/right louvre). "all" keeps every extra.
 local FEATURE_SETS = { all = true, nanoex = true, econavi = true, basic = true }
--- What each feature set hides. "minimal" (Basic without Eco) is never a
--- setting: it's used when the unit itself rejected Eco.
 -- What each feature set's PROFILE leaves out (profile names; never change,
--- devices use them).
+-- devices use them). "minimal" (Basic without Eco) is never a setting: it's
+-- used when the unit itself rejected Eco. tools/make_profiles.py reads this
+-- table to build the profiles; SETTING_HIDES below is derived from it.
 local HIDES = {
   all = {},
   nanoex = { econavi = true, milddry = true },
@@ -51,14 +51,18 @@ local HIDES = {
   basic = { econavi = true, nanoex = true, milddry = true, widevane = true },
   minimal = { econavi = true, nanoex = true, milddry = true, widevane = true, eco = true },
 }
--- What each "Unit features" choice hides. Basic leaves the left/right vane to
--- learning (units without louvres refuse it), so it also suits units that have it.
-local SETTING_HIDES = {
-  all = HIDES.all,
-  nanoex = HIDES.nanoex,
-  econavi = HIDES.econavi,
-  basic = { econavi = true, nanoex = true, milddry = true },
-}
+-- What each "Unit features" choice hides: its profile's HIDES, except the
+-- left/right vane, which is left to learning (units without louvres refuse
+-- it), so Basic also suits units that have it.
+local SETTING_HIDES = {}
+for name in pairs(FEATURE_SETS) do
+  SETTING_HIDES[name] = {}
+  for key in pairs(HIDES[name]) do
+    if key ~= "widevane" then
+      SETTING_HIDES[name][key] = true
+    end
+  end
+end
 local SET_ORDER = { "all", "nanoex", "econavi", "basic", "minimal" }
 local AUTH_FIELD = "needs_password"
 
@@ -103,6 +107,9 @@ local LEARNED_FIELD = "rejected"
 local PENDING_FIELD = "pending_checks"
 local LEARN_AFTER = 2
 local JUDGE_SECONDS = 60
+-- A put-back only counts from this age on, so a unit that applies a
+-- setting slowly isn't taken for one that refuses it.
+local PUT_BACK_MIN_SECONDS = 12
 local OFFLINE_AFTER_FAILURES = 3
 local REDISCOVER_AFTER_FAILURES = 2
 -- Polls without a paired thermometer before its component is removed.
@@ -169,7 +176,11 @@ local function resolve_ip(driver, device, force)
   end
   local mac = mac_of(device)
   local host = not mac and host_of(device)
-  if (force or not ip) and (mac or host) then
+  -- A scan probes every web server on the LAN (and sends this device's
+  -- password to each ClimateControl module), so with no address known it runs
+  -- at most every RESCAN_SECONDS, not on every poll or command.
+  local scan_due = os.time() - (device:get_field(LAST_SCAN_FIELD) or 0) >= RESCAN_SECONDS
+  if (force or (not ip and scan_due)) and (mac or host) then
     device:set_field(LAST_SCAN_FIELD, os.time())
     local match, count = nil, 0
     for _, m in ipairs(discovery.find_modules({ s.password })) do
@@ -282,11 +293,15 @@ local function profile_hidden(device)
 end
 
 --- Ask for a profile once (the change arrives as infoChanged).
+--- A switch whose result never arrives (the update was dropped) is
+--- requested again after PROFILE_RETRY_SECONDS.
+local PROFILE_RETRY_SECONDS = 300
 local function request_profile(device, profile)
-  if device:get_field(PROFILE_REQUEST_FIELD) == profile then
+  local last = device:get_field(PROFILE_REQUEST_FIELD)
+  if type(last) == "table" and last.profile == profile and os.time() - last.at < PROFILE_RETRY_SECONDS then
     return
   end
-  device:set_field(PROFILE_REQUEST_FIELD, profile)
+  device:set_field(PROFILE_REQUEST_FIELD, { profile = profile, at = os.time() })
   log.info(tostring(device.label) .. ": switching to profile " .. profile)
   device:try_update_metadata({ profile = profile })
 end
@@ -309,7 +324,23 @@ wanted_hidden = function(device)
       hidden[k] = true
     end
   end
+  -- No left/right value in the status at all (e.g. "unknown"): the control
+  -- can't work, and with no value to see put back it could never be learned.
+  local last = device:get_field(LAST_FIELD)
+  if last and last.widevane == nil then
+    hidden.widevane = true
+  end
   return hidden
+end
+
+--- Whether any window/door sensor in a status reads open.
+local function any_window_open(windows)
+  for _, w in ipairs(windows or {}) do
+    if w.open then
+      return true
+    end
+  end
+  return false
 end
 
 --- Remember a command whose result is judged over the next minute.
@@ -319,10 +350,7 @@ local function expect(device, key, value, before)
   local last = device:get_field(LAST_FIELD) or {}
   local pending = device:get_field(PENDING_FIELD) or {}
   pending[key] = nil
-  local window_open = false
-  for _, w in ipairs(last.windows or {}) do
-    window_open = window_open or w.open
-  end
+  local window_open = any_window_open(last.windows)
   -- Extras are only judged in Cool or Heat: a unit may refuse e.g. Eco in Auto,
   -- Dry or Fan mode although it has it, which would hide a working switch.
   local mode_ok = key == "heat" or last.mode == "cool" or last.mode == "heat"
@@ -354,10 +382,7 @@ local function judge(device, parsed)
   if not pending or next(pending) == nil then
     return false
   end
-  local window_open = false
-  for _, w in ipairs(parsed.windows or {}) do
-    window_open = window_open or w.open
-  end
+  local window_open = any_window_open(parsed.windows)
   local learned = device:get_field(LEARNED_FIELD) or {}
   local changed_any = false
   for key, p in pairs(pending) do
@@ -365,11 +390,15 @@ local function judge(device, parsed)
     local age = os.time() - p.at
     local others_changed = parsed.preset ~= p.preset or parsed.fan ~= p.fan
         or (key ~= "heat" and parsed.mode ~= p.mode)
+    -- Heat refused: the unit stays in, or falls back to, another mode.
+    local put_back = now == p.before or (key == "heat" and now ~= nil and now ~= p.value)
     if window_open or parsed.power ~= "on" or others_changed then
       pending[key] = nil
-    elseif now == p.before and age < 4 then
-      -- Too soon: the module may not have passed the command on yet.
-    elseif now == p.before and age <= JUDGE_SECONDS then
+    elseif put_back and age < PUT_BACK_MIN_SECONDS then
+      -- Too soon: the module may not have passed the command on yet (the
+      -- 2 s and 7 s re-reads can still show the old value on a unit that
+      -- applies it slowly; the next regular poll decides).
+    elseif put_back and age <= JUDGE_SECONDS then
       pending[key] = nil
       local before_hidden = rejected(device, key)
       learned[key] = (learned[key] or 0) + 1
@@ -831,8 +860,12 @@ end
 
 local function set_mode(driver, device, command)
   local mode = command.args.mode
-  if mode == "heat" and (get_settings(device).cooling_only or rejected(device, "heat")) then
+  if mode == "heat" and get_settings(device).cooling_only then
     log.warn(device.label .. ": Heat ignored, the unit is set as cooling only")
+    return
+  elseif mode == "heat" and rejected(device, "heat") then
+    log.warn(device.label .. ": Heat ignored, the unit refused it before "
+      .. "(change Unit features in Settings to try it again)")
     return
   end
   local value = Status.mode_to_device(mode)
@@ -846,7 +879,10 @@ local function set_mode(driver, device, command)
   if turn_on then
     table.insert(commands, { "power", "on" })
   end
-  local check = mode == "heat" and { "heat", "heat", (last.power == "on" or turn_on) and last.mode or nil } or nil
+  -- Off, the module reports no mode, so "off" stands in for it: any mode other
+  -- than Heat afterwards is then a refusal (see judge).
+  local check = mode == "heat" and (last.power == "on" or turn_on)
+      and { "heat", "heat", last.mode or "off" } or nil
   if send(driver, device, commands, check) then
     emit(device, "main", "mode", capabilities.airConditionerMode.airConditionerMode(Status.mode_from_device(value)))
     if turn_on then
@@ -1049,15 +1085,14 @@ local function info_changed(driver, device, event, args)
   device:set_field(PROFILE_REQUEST_FIELD, nil)
   device:set_field(EMIT_CACHE_FIELD, {})
   device:set_field(FAILURES_FIELD, 0)
-  emit_supported(device)
   -- "Unit features" changed: forget what the unit rejected (that's how a
   -- wrongly hidden switch comes back), then switch to the matching profile.
   local old_prefs = args and args.old_st_store and args.old_st_store.preferences
   if old_prefs and old_prefs.unitFeatures ~= (device.preferences or {}).unitFeatures then
     device:set_field(LEARNED_FIELD, nil, { persist = true })
     device:set_field(PENDING_FIELD, nil)
-    emit_supported(device)
   end
+  emit_supported(device)
   if hidden_code(profile_hidden(device)) ~= hidden_code(wanted_hidden(device)) then
     request_profile(device, wanted_profile(device, device.profile.components.thermometer ~= nil,
       device.profile.components.window ~= nil))

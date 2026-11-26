@@ -13,37 +13,60 @@ local pb = require "protobuf"
 local log = require "log"
 
 local BAF_PORT = 31415
-local BURST_IDLE_TIMEOUT = 1 -- seconds between frames that ends a query's read
+-- Seconds of silence between frames that ends a query's read. 2.5 s rides out
+-- one TCP retransmit on a lossy 2.4 GHz link; at 1 s a late chunk was cut off
+-- and its fields were shown at their defaults.
+local BURST_IDLE_TIMEOUT = 2.5
 local MAX_FRAME_BYTES = 8192 -- safety cap against a runaway/garbled stream
 
 local BafClient = {}
 
 --- Reads one complete SLIP frame (leading 0xC0 through the next 0xC0) off
 --- `sock`, byte by byte since SLIP has no length prefix to read ahead by.
---- Returns the raw framed bytes (including both delimiters), or nil, error.
+--- Returns the raw framed bytes (including both delimiters), or nil, error,
+--- kind. kind "io" is a timeout or closed socket (end of the burst);
+--- "framing" is a garbled stream, after which the next call resyncs.
+---
+--- Resync: stray bytes before a start delimiter are skipped, and two
+--- delimiters in a row (the end of a frame joined part-way, then the next
+--- frame's start) are treated as one, so one lost byte costs one frame, not
+--- the rest of the burst.
 local function read_slip_frame(sock)
-  local first, err = sock:receive(1)
-  if not first then
-    return nil, "read failed waiting for start delimiter: " .. tostring(err)
-  end
-  if first ~= slip.END_BYTE then
-    return nil, "expected SLIP start delimiter, got byte " .. string.byte(first)
-  end
-
-  local chunks = { first }
-  local total = 1
+  local skipped = 0
   while true do
-    local b, recv_err = sock:receive(1)
+    local b, err = sock:receive(1)
     if not b then
-      return nil, "read failed waiting for end delimiter: " .. tostring(recv_err)
+      return nil, "read failed waiting for start delimiter: " .. tostring(err), "io"
     end
-    chunks[#chunks + 1] = b
-    total = total + 1
     if b == slip.END_BYTE then
       break
     end
-    if total > MAX_FRAME_BYTES then
-      return nil, "SLIP frame exceeded " .. MAX_FRAME_BYTES .. " bytes without a closing delimiter"
+    skipped = skipped + 1
+    if skipped > MAX_FRAME_BYTES then
+      return nil, "no SLIP start delimiter in " .. MAX_FRAME_BYTES .. " bytes", "framing"
+    end
+  end
+  if skipped > 0 then
+    log.warn("BAF: skipped " .. skipped .. " stray byte(s) before a SLIP frame")
+  end
+
+  local chunks = { slip.END_BYTE }
+  while true do
+    local b, recv_err = sock:receive(1)
+    if not b then
+      return nil, "read failed waiting for end delimiter: " .. tostring(recv_err), "io"
+    end
+    if b == slip.END_BYTE then
+      if #chunks > 1 then
+        chunks[#chunks + 1] = b
+        break
+      end
+      -- Delimiter straight after a delimiter: this one starts the frame.
+    else
+      chunks[#chunks + 1] = b
+      if #chunks > MAX_FRAME_BYTES then
+        return nil, "SLIP frame exceeded " .. MAX_FRAME_BYTES .. " bytes without a closing delimiter", "framing"
+      end
     end
   end
   return table.concat(chunks)
@@ -100,7 +123,9 @@ end
 --- newly-added third category. See baf_protocol.lua's
 --- parse_frame_fields and the project-status memory entry on this for
 --- the full story and how it was confirmed.
-function BafClient.query_multi(ip, category_names, timeout_sec)
+--- `optional` (a set of category names, may be nil): categories that may go
+--- unanswered without failing the whole query; they're left out of the result.
+function BafClient.query_multi(ip, category_names, timeout_sec, optional)
   local sock, err = socket.tcp()
   if not sock then
     return nil, "socket create failed: " .. tostring(err)
@@ -174,9 +199,13 @@ function BafClient.query_multi(ip, category_names, timeout_sec)
   local total_wanted = #category_names
   local max_frames = total_wanted * 15 + 10
   for _ = 1, max_frames do
-    local frame = read_slip_frame(sock)
+    local frame, read_err, kind = read_slip_frame(sock)
     if not frame then
-      break -- out of frames or timed out -- stop, evaluate what we got
+      if kind ~= "framing" then
+        break -- out of frames or timed out -- stop, evaluate what we got
+      end
+      log.warn("BAF query_multi: skipping a garbled frame: " .. tostring(read_err))
+      goto continue
     end
     sock:settimeout(BURST_IDLE_TIMEOUT)
     -- slip.decode / parse_frame_fields->pb.parse_fields can throw a raw
@@ -220,7 +249,11 @@ function BafClient.query_multi(ip, category_names, timeout_sec)
 
   for _, category_name in ipairs(category_names) do
     if not satisfied[category_name] then
-      return nil, "no response ever matched category '" .. category_name .. "'"
+      if optional and optional[category_name] then
+        results[category_name] = nil -- unanswered: don't pass its defaults on as data
+      else
+        return nil, "no response ever matched category '" .. category_name .. "'"
+      end
     end
   end
 
@@ -309,6 +342,16 @@ function BafClient.commit_and_verify_more(ip, props, timeout_sec)
     sock:close()
     return false, nil, "identity query read failed: " .. tostring(identity_read_err)
   end
+  -- The identity answer can span several frames: drain the rest first, so
+  -- they aren't read below as the commit's push burst.
+  sock:settimeout(0.3)
+  for _ = 1, 12 do
+    local extra, _, kind = read_slip_frame(sock)
+    if not extra and kind ~= "framing" then
+      break
+    end
+  end
+  sock:settimeout(timeout_sec or 5)
 
   local commit_msg = baf.build_commit(props)
   local commit_sent, commit_send_err = sock:send(slip.encode(commit_msg))
@@ -326,9 +369,12 @@ function BafClient.commit_and_verify_more(ip, props, timeout_sec)
   sock:settimeout(0.3)
   local verified = {}
   for _ = 1, 12 do -- generous headroom over the ~5 frames observed live
-    local frame = read_slip_frame(sock)
-    if not frame then
+    local frame, _, kind = read_slip_frame(sock)
+    if not frame and kind ~= "framing" then
       break
+    end
+    if not frame then
+      goto next_push
     end
     -- Same as query_multi: a corrupt frame is skipped, not thrown past close().
     local parsed, result = pcall(function()
@@ -343,6 +389,7 @@ function BafClient.commit_and_verify_more(ip, props, timeout_sec)
         end
       end
     end
+    ::next_push::
   end
 
   sock:close()
@@ -381,9 +428,12 @@ function BafClient.query_schedules(ip, timeout_sec)
   sock:settimeout(0.5)
   local schedules = {}
   for _ = 1, 20 do -- generous headroom; a genuine idle timeout ends the loop
-    local frame = read_slip_frame(sock)
-    if not frame then
+    local frame, _, kind = read_slip_frame(sock)
+    if not frame and kind ~= "framing" then
       break
+    end
+    if not frame then
+      goto next_schedule
     end
     local parsed, sched = pcall(function()
       return baf.parse_schedule_frame(slip.decode(frame))
@@ -393,6 +443,7 @@ function BafClient.query_schedules(ip, timeout_sec)
     elseif sched then
       table.insert(schedules, sched)
     end
+    ::next_schedule::
   end
 
   sock:close()

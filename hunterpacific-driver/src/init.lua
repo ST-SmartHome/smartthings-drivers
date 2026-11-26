@@ -81,23 +81,6 @@ local function get_settings(device)
   }
 end
 
-local function get_settings(device)
-  if is_light_child(device) then
-    local parent = device:get_parent_device()
-    if not parent then
-      return {}
-    end
-    return get_settings(parent)
-  end
-  local prefs = device.preferences or {}
-  return {
-    ip = prefs.ipAddress,
-    local_key = prefs.localKey,
-    device_id = prefs.deviceId,
-    poll_interval = tonumber(prefs.pollInterval) or 30,
-  }
-end
-
 local function level_to_percent(value)
   return math.floor((value / BRIGHTNESS_MAX) * 100 + 0.5)
 end
@@ -157,7 +140,10 @@ local KEY_BACKOFF_UNTIL_FIELD = "key_backoff_until"
 local FAILURES_FIELD = "consecutive_poll_failures"
 local OFFLINE_FIELD = "marked_offline"
 
-local KEY_ERROR_PATTERNS = { "not a table", "decrypt failed", "HMAC", "no dps field", "wrong local key" }
+-- Only replies that can't be decrypted or verified, or that the fan
+-- rejects, point at the settings; an ACK, an empty reply or a status push
+-- is retried like a network failure.
+local KEY_ERROR_PATTERNS = { "decrypt failed", "HMAC", "wrong local key", "wrong Device ID" }
 
 local function is_key_error(err)
   local text = tostring(err)
@@ -183,10 +169,18 @@ local function settings_problem(s)
   return nil
 end
 
-local function mark_offline(device, reason)
+local function mark_offline(device, reason, driver)
   if not device:get_field(OFFLINE_FIELD) then
     device:offline()
     device:set_field(OFFLINE_FIELD, true)
+    -- The fan's light device goes with it; online() is sent again with the
+    -- next light data (LIGHT_ONLINE_FIELD cleared).
+    local child = driver and find_light_child(driver, device) or nil
+    if child then
+      child:offline()
+      child:set_field(LIGHT_ONLINE_FIELD, nil)
+      log.info("Hunter Pacific " .. tostring(child.label) .. " marked offline with its fan")
+    end
   end
   log.error("Hunter Pacific " .. tostring(device.label) .. " offline: " .. reason)
 end
@@ -194,24 +188,28 @@ end
 local function mark_online(device)
   device:set_field(FAILURES_FIELD, 0)
   device:set_field(KEY_BACKOFF_UNTIL_FIELD, nil)
-  if device:get_field(OFFLINE_FIELD) then
+  -- nil (just after a driver restart) also calls online(): the platform
+  -- may still have the device offline from before the restart.
+  if device:get_field(OFFLINE_FIELD) ~= false then
     device:online()
+    if device:get_field(OFFLINE_FIELD) then
+      log.info("Hunter Pacific " .. tostring(device.label) .. " back online")
+    end
     device:set_field(OFFLINE_FIELD, false)
-    log.info("Hunter Pacific " .. tostring(device.label) .. " back online")
   end
 end
 
-local function record_failure(device, err)
+local function record_failure(device, err, driver)
   if is_key_error(err) then
     device:set_field(KEY_BACKOFF_UNTIL_FIELD, os.time() + KEY_BACKOFF_SECONDS)
     mark_offline(device, "the fan answered but its reply can't be decoded. Check the Local Key and Device ID ("
-      .. tostring(err) .. "). Retrying every " .. KEY_BACKOFF_SECONDS .. " s until the settings change")
+      .. tostring(err) .. "). Retrying every " .. KEY_BACKOFF_SECONDS .. " s until the settings change", driver)
     return
   end
   local failures = (device:get_field(FAILURES_FIELD) or 0) + 1
   device:set_field(FAILURES_FIELD, failures)
   if failures >= OFFLINE_AFTER_FAILURES then
-    mark_offline(device, failures .. " polls in a row failed: " .. tostring(err) .. ". Check the IP address and that the fan has power")
+    mark_offline(device, failures .. " polls in a row failed: " .. tostring(err) .. ". Check the IP address and that the fan has power", driver)
   end
 end
 
@@ -227,7 +225,7 @@ local function poll_once(driver, device)
     end
     local problem = settings_problem(s)
     if problem then
-      mark_offline(device, problem)
+      mark_offline(device, problem, driver)
       return
     end
     local backoff_until = device:get_field(KEY_BACKOFF_UNTIL_FIELD)
@@ -245,7 +243,7 @@ local function poll_once(driver, device)
       dps, query_err = TuyaClient.query_status(s.ip, s.local_key, s.device_id, 5)
     end
     if not dps then
-      record_failure(device, query_err)
+      record_failure(device, query_err, driver)
       return
     end
     mark_online(device)
@@ -308,7 +306,11 @@ local function refresh_after_command(driver, device)
   if is_light_child(device) then
     local parent = device:get_parent_device()
     if parent then
-      poll_once(driver, parent)
+      -- On the fan's own thread, like writes: the fan takes one connection
+      -- at a time, so this mustn't overlap its scheduled poll.
+      parent.thread:queue_event(function()
+        poll_once(driver, parent)
+      end)
     end
     return
   end
@@ -444,6 +446,18 @@ local function send_dp(driver, device, dps, refresh_after, opts)
     end
   end
   local label = tostring(parent.label)
+  -- Not sent while the settings are clearly wrong or a wrong key is backing
+  -- off (it would retry against e.g. the placeholder IP for up to 45 s).
+  local problem = settings_problem(s)
+  if problem then
+    log.warn("Hunter Pacific command not sent (" .. label .. "): " .. problem)
+    return
+  end
+  local backoff_until = parent:get_field(KEY_BACKOFF_UNTIL_FIELD)
+  if backoff_until and os.time() < backoff_until then
+    log.warn("Hunter Pacific command not sent (" .. label .. "): the Local Key or Device ID looks wrong; check Settings")
+    return
+  end
 
   write_sequence = write_sequence + 1
   local seq = write_sequence
@@ -466,7 +480,9 @@ local function send_dp(driver, device, dps, refresh_after, opts)
     local ok, err = pcall(function()
       local deadline = os.time() + ((opts and opts.deadline) or WRITE_DEADLINE_SECONDS)
       local max_attempts = (opts and opts.attempts) or WRITE_MAX_ATTEMPTS
+      local tried = 0
       for attempt = 1, max_attempts do
+        tried = attempt
         if not is_current() then
           log.info(string.format("Hunter Pacific write %s superseded by a newer command (%s)", wanted, label))
           return
@@ -502,7 +518,7 @@ local function send_dp(driver, device, dps, refresh_after, opts)
           backoff(attempt)
         end
       end
-      log.error(string.format("Hunter Pacific write %s gave up after %d attempts (%s)", wanted, max_attempts, label))
+      log.error(string.format("Hunter Pacific write %s gave up after %d attempt(s) (%s)", wanted, tried, label))
     end)
     if not ok then
       log.error("Hunter Pacific write crashed (" .. label .. "): " .. tostring(err))
@@ -599,7 +615,6 @@ local function ensure_light_child(driver, device, dps)
   end
 end
 
-after_successful_poll = ensure_light_child
 
 --- Removes this fan's light device. Called only when the user turns No Physical Light on.
 local function delete_light_child(driver, device)
@@ -627,6 +642,17 @@ local function delete_light_child(driver, device)
   end
 end
 
+-- After every successful poll: a light device left over while Light Kit
+-- Fitted is off (e.g. created just after the setting was turned off, since
+-- creation is asynchronous) is removed; otherwise create one if needed.
+after_successful_poll = function(driver, device, dps)
+  if not is_light_child(device) and not (device.preferences and device.preferences.lightFitted)
+      and find_light_child(driver, device) then
+    delete_light_child(driver, device)
+    return
+  end
+  ensure_light_child(driver, device, dps)
+end
 
 local function device_init(driver, device)
   log.info("Hunter Pacific device init: " .. device.id)
@@ -666,6 +692,15 @@ local function device_removed(driver, device)
   local existing_timer = device:get_field(POLL_TIMER_FIELD)
   if existing_timer then
     device.thread:cancel_timer(existing_timer)
+  end
+  -- A removed fan takes its light device with it (a leftover light would
+  -- also stop discovery from adding the fan back).
+  if not is_light_child(device) then
+    local child = find_light_child(driver, device)
+    if child and type(driver.try_delete_device) == "function" then
+      log.info("Hunter Pacific fan removed: deleting its light device " .. tostring(child.label))
+      pcall(driver.try_delete_device, driver, child.id)
+    end
   end
   log.info("Hunter Pacific device removed: " .. device.id)
 end

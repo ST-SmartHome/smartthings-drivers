@@ -197,7 +197,10 @@ local KEY_BACKOFF_UNTIL_FIELD = "key_backoff_until"
 local FAILURES_FIELD = "consecutive_poll_failures"
 local OFFLINE_FIELD = "marked_offline"
 
-local KEY_ERROR_PATTERNS = { "not a table", "decrypt failed", "HMAC", "no dps field", "wrong local key" }
+-- Only replies that can't be decrypted or verified, or that the fan
+-- rejects, point at the settings; an ACK, an empty reply or a status push
+-- is retried like a network failure.
+local KEY_ERROR_PATTERNS = { "decrypt failed", "HMAC", "wrong local key", "wrong Device ID" }
 
 local function is_key_error(err)
   local text = tostring(err)
@@ -223,10 +226,19 @@ local function settings_problem(s)
   return nil
 end
 
-local function mark_offline(device, reason)
+local function mark_offline(device, reason, driver)
   if not device:get_field(OFFLINE_FIELD) then
     device:offline()
     device:set_field(OFFLINE_FIELD, true)
+    -- Its light device can't be reached either; online() is sent again with
+    -- the next light data (LIGHT_ONLINE_FIELD cleared).
+    -- The fan's light device goes with it.
+    local child = driver and find_light_child(driver, device) or nil
+    if child then
+      child:offline()
+      child:set_field(LIGHT_ONLINE_FIELD, nil)
+      log.info("Skyfan DC " .. tostring(child.label) .. " marked offline with its fan")
+    end
   end
   log.error("Skyfan DC " .. tostring(device.label) .. " offline: " .. reason)
 end
@@ -234,24 +246,28 @@ end
 local function mark_online(device)
   device:set_field(FAILURES_FIELD, 0)
   device:set_field(KEY_BACKOFF_UNTIL_FIELD, nil)
-  if device:get_field(OFFLINE_FIELD) then
+  -- nil (just after a driver restart) also calls online(): the platform
+  -- may still have the device offline from before the restart.
+  if device:get_field(OFFLINE_FIELD) ~= false then
     device:online()
+    if device:get_field(OFFLINE_FIELD) then
+      log.info("Skyfan DC " .. tostring(device.label) .. " back online")
+    end
     device:set_field(OFFLINE_FIELD, false)
-    log.info("Skyfan DC " .. tostring(device.label) .. " back online")
   end
 end
 
-local function record_failure(device, err)
+local function record_failure(device, err, driver)
   if is_key_error(err) then
     device:set_field(KEY_BACKOFF_UNTIL_FIELD, os.time() + KEY_BACKOFF_SECONDS)
     mark_offline(device, "the fan answered but its reply can't be decoded. Check the Local Key and Device ID ("
-      .. tostring(err) .. "). Retrying every " .. KEY_BACKOFF_SECONDS .. " s until the settings change")
+      .. tostring(err) .. "). Retrying every " .. KEY_BACKOFF_SECONDS .. " s until the settings change", driver)
     return
   end
   local failures = (device:get_field(FAILURES_FIELD) or 0) + 1
   device:set_field(FAILURES_FIELD, failures)
   if failures >= OFFLINE_AFTER_FAILURES then
-    mark_offline(device, failures .. " polls in a row failed: " .. tostring(err) .. ". Check the IP address and that the fan has power")
+    mark_offline(device, failures .. " polls in a row failed: " .. tostring(err) .. ". Check the IP address and that the fan has power", driver)
   end
 end
 
@@ -267,7 +283,7 @@ local function poll_once(driver, device)
     end
     local problem = settings_problem(s)
     if problem then
-      mark_offline(device, problem)
+      mark_offline(device, problem, driver)
       return
     end
     local backoff_until = device:get_field(KEY_BACKOFF_UNTIL_FIELD)
@@ -285,7 +301,7 @@ local function poll_once(driver, device)
       dps, query_err = TuyaClient.query_status(s.ip, s.local_key, s.device_id, 5)
     end
     if not dps then
-      record_failure(device, query_err)
+      record_failure(device, query_err, driver)
       return
     end
     mark_online(device)
@@ -348,7 +364,11 @@ local function refresh_after_command(driver, device)
   if is_light_child(device) then
     local parent = device:get_parent_device()
     if parent then
-      poll_once(driver, parent)
+      -- On the fan's own thread, like writes: the fan takes one connection
+      -- at a time, so this mustn't overlap its scheduled poll.
+      parent.thread:queue_event(function()
+        poll_once(driver, parent)
+      end)
     end
     return
   end
@@ -482,6 +502,18 @@ local function send_dp(driver, device, dps, refresh_after)
     end
   end
   local label = tostring(parent.label)
+  -- Not sent while the settings are clearly wrong or a wrong key is backing
+  -- off (it would retry against e.g. the placeholder IP for up to 45 s).
+  local problem = settings_problem(s)
+  if problem then
+    log.warn("Skyfan DC command not sent (" .. label .. "): " .. problem)
+    return
+  end
+  local backoff_until = parent:get_field(KEY_BACKOFF_UNTIL_FIELD)
+  if backoff_until and os.time() < backoff_until then
+    log.warn("Skyfan DC command not sent (" .. label .. "): the Local Key or Device ID looks wrong; check Settings")
+    return
+  end
 
   write_sequence = write_sequence + 1
   local seq = write_sequence
@@ -565,6 +597,8 @@ local NO_LIGHT_NO_ADDFAN_PROFILE = "skyfan-dc-no-light-no-addfan.v2"
 -- preferences), so this field is the only way
 -- an automatic detection can actually stick.
 local PROBED_NO_LIGHT_FIELD = "probed_no_light"
+-- Set when the user turns No Physical Light on (not a profile default).
+local USER_NO_LIGHT_FIELD = "user_no_light"
 
 --- Which profile a device should be on right now, given its currently-saved
 --- noLight/hideAddFan preferences. Defaults to the original with-light,
@@ -701,6 +735,13 @@ local function ensure_light_child(driver, device, dps)
   if find_light_child(driver, device) then
     return
   end
+  -- A light seen after all (an earlier reply was partial, e.g. a status
+  -- push): undo the "no light" verdict so the light device is created.
+  if dps["15"] ~= nil and device:get_field(PROBED_NO_LIGHT_FIELD) == true then
+    log.info("Skyfan DC " .. tostring(device.label) .. " reports a light after all (DP 15); creating its light device")
+    device:set_field(PROBED_NO_LIGHT_FIELD, nil, { persist = true })
+    ensure_correct_profile(driver, device)
+  end
   if dps["15"] == nil then
     if device:get_field(PROBED_NO_LIGHT_FIELD) ~= true then
       log.info("Skyfan DC " .. tostring(device.label) .. " reports no light (no DP 15); not creating a light device")
@@ -733,7 +774,6 @@ local function ensure_light_child(driver, device, dps)
   end
 end
 
-after_successful_poll = ensure_light_child
 
 --- Removes this fan's light device. Called only when the user turns No Physical Light on.
 local function delete_light_child(driver, device)
@@ -762,6 +802,19 @@ local function delete_light_child(driver, device)
 end
 
 local delete_api_logged = false
+-- After every successful poll: a light device that turned up after the
+-- user switched No Physical Light on (creation is asynchronous, so a
+-- request just before the switch can land after it) is removed; otherwise
+-- create one if needed. Only after a USER change (USER_NO_LIGHT_FIELD):
+-- noLight can also read true from a profile default (see info_changed).
+after_successful_poll = function(driver, device, dps)
+  if not is_light_child(device) and device:get_field(USER_NO_LIGHT_FIELD) == true
+      and device.preferences and device.preferences.noLight and find_light_child(driver, device) then
+    delete_light_child(driver, device)
+    return
+  end
+  ensure_light_child(driver, device, dps)
+end
 
 local function device_init(driver, device)
   log.info("Skyfan DC device init: " .. device.id)
@@ -832,8 +885,22 @@ local function info_changed(driver, device, event, args)
     and (old.noLight ~= device.preferences.noLight or old.hideAddFan ~= device.preferences.hideAddFan) then
     log.info("Skyfan DC noLight/hideAddFan changed on " .. tostring(device.label) .. ", re-checking profile")
     ensure_correct_profile(driver, device)
+    -- The no-light profiles default noLight to true and the light ones to
+    -- false, so an unset noLight flips false->true when our own profile
+    -- switch lands (e.g. after a light child is created). Only a change made
+    -- while the profile stayed the same is the user's: delete only then.
+    local old_profile = args.old_st_store.profile and args.old_st_store.profile.id
+    local profile_switched = old_profile ~= nil and old_profile ~= device.profile.id
     if device.preferences.noLight and not old.noLight then
-      delete_light_child(driver, device)
+      if profile_switched then
+        log.info("Skyfan DC noLight on " .. tostring(device.label)
+          .. " changed with a profile switch (a profile default, not the user): light kept")
+      else
+        device:set_field(USER_NO_LIGHT_FIELD, true, { persist = true })
+        delete_light_child(driver, device)
+      end
+    elseif old.noLight and not device.preferences.noLight then
+      device:set_field(USER_NO_LIGHT_FIELD, nil, { persist = true })
     end
   end
   start_polling(driver, device)
@@ -843,6 +910,15 @@ local function device_removed(driver, device)
   local existing_timer = device:get_field(POLL_TIMER_FIELD)
   if existing_timer then
     device.thread:cancel_timer(existing_timer)
+  end
+  -- A removed fan takes its light device with it (a leftover light would
+  -- also stop discovery from adding the fan back).
+  if not is_light_child(device) then
+    local child = find_light_child(driver, device)
+    if child and type(driver.try_delete_device) == "function" then
+      log.info("Skyfan DC fan removed: deleting its light device " .. tostring(child.label))
+      pcall(driver.try_delete_device, driver, child.id)
+    end
   end
   log.info("Skyfan DC device removed: " .. device.id)
 end
@@ -855,10 +931,17 @@ end
 --- is "main", so the component check alone would wrongly fall through to
 --- the fan branch). Both checks needed side by side — devices in either
 --- state can exist at once while the pilot is scoped to one fan.
+--- A newer fan on/off cancels a direction change still in progress (its
+--- stop/verify steps would otherwise switch the fan back off).
+local function cancel_direction_change(device)
+  device:set_field("direction_change_token", (device:get_field("direction_change_token") or 0) + 1)
+end
+
 local function switch_on(driver, device, command)
   if is_light_child(device) or command.component == "light" then
     send_dp(driver, device, {["15"] = true}, true)
   else
+    cancel_direction_change(device)
     send_dp(driver, device, {["1"] = true}, true)
   end
 end
@@ -867,6 +950,7 @@ local function switch_off(driver, device, command)
   if is_light_child(device) or command.component == "light" then
     send_dp(driver, device, {["15"] = false}, true)
   else
+    cancel_direction_change(device)
     send_dp(driver, device, {["1"] = false}, true)
   end
 end
@@ -882,6 +966,11 @@ end
 
 local function set_level(driver, device, command)
   local percent = math.max(0, math.min(100, command.args.level))
+  -- 0% means off (the light's lowest brightness step is 20%).
+  if percent <= 0 then
+    send_dp(driver, device, {["15"] = false}, true)
+    return
+  end
   local bright_value = math.max(1, math.min(5, math.floor((percent / 100) * 5 + 0.5)))
   send_dp(driver, device, {["16"] = bright_value}, true)
 end

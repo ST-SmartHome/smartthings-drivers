@@ -10,7 +10,6 @@ local POLL_IN_PROGRESS_FIELD = "poll_in_progress"
 local HAS_BATTERY_FIELD = "has_battery"
 local THREE_PHASE_FIELD = "three_phase"
 local BATTERY_SEEN_FIELD = "battery_seen_polls"
-local BATTERY_MISSING_FIELD = "battery_missing_polls"
 local BATTERY_CONFIRM_POLLS = 3
 local PHASES_SEEN_FIELD = "phases_seen_polls"
 local PHASES_CONFIRM_POLLS = 3
@@ -18,7 +17,15 @@ local APPLIED_PROFILE_FIELD = "applied_profile"
 local FAILURES_FIELD = "consecutive_poll_failures"
 local OFFLINE_FIELD = "marked_offline"
 local OFFLINE_AFTER_FAILURES = 3
-local BATTERY_GONE_POLLS = 60
+-- The battery section / three-phase rows are removed only after this long
+-- with clean "not there" reads in a row. A failed read never counts, and a
+-- battery that sleeps overnight isn't removed (it was 60 polls, i.e. 10 min
+-- at a 10 s poll interval).
+local GONE_AFTER_SECONDS = 24 * 3600
+local BATTERY_ABSENT_SINCE_FIELD = "battery_absent_since"
+local PHASES_ABSENT_SINCE_FIELD = "phases_absent_since"
+-- The profiles' default IP: still set means the real one was never entered.
+local PLACEHOLDER_IP = "192.168.1.100"
 -- Profile per detected hardware. Non-battery single-phase installs stay
 -- on CURRENT_PROFILE. Three-phase needs 3 polls in a row, is persisted and
 -- only ever switches ON.
@@ -42,6 +49,11 @@ local function round(x, places)
   return v
 end
 
+--- "%.1f"-style text for a value that may be nil (not implemented).
+local function fmt(pattern, v)
+  return v and string.format(pattern, v) or "n/a"
+end
+
 local function target_profile(device)
   local batt = device:get_field(HAS_BATTERY_FIELD)
   local three = device:get_field(THREE_PHASE_FIELD)
@@ -55,6 +67,37 @@ local GRID_ENERGY_CAP = capabilities["aboutisland47519.gridEnergy"]
 local DC_INPUT_CAP = capabilities["aboutisland47519.dcInput"]
 local BATTERY_STATUS_CAP = capabilities["aboutisland47519.batteryStatus"]
 local BATTERY_STORAGE_CAP = capabilities["aboutisland47519.batteryStorage"]
+
+--- Switches the device to the profile its flags call for, remembering it.
+local function apply_profile(device, target)
+  device:try_update_metadata({ profile = target })
+  device:set_field(APPLIED_PROFILE_FIELD, target, { persist = true })
+end
+
+--- Whether the device's actual profile has the sections its flags call for
+--- (a profile switch can fail silently, and then needs repeating).
+local function profile_matches(device)
+  local comps = device.profile and device.profile.components or {}
+  local has_battery = comps.battery ~= nil
+  local has_phases = comps.grid ~= nil and device:supports_capability(PHASE_CAPS[2], "grid")
+  return has_battery == (device:get_field(HAS_BATTERY_FIELD) == true)
+    and has_phases == (device:get_field(THREE_PHASE_FIELD) == true)
+end
+
+--- A lifetime total for display: nil if missing, zero (SunSpec "not
+--- accumulated") or lower than the last one shown (a garbled read).
+local function steady_total(device, field, value)
+  if not value or value <= 0 then
+    return nil
+  end
+  local last = device:get_field(field)
+  if last and value < last then
+    log.warn(string.format("SolarEdge: %s went backwards (%.0f after %.0f), not shown", field, value, last))
+    return nil
+  end
+  device:set_field(field, value)
+  return value
+end
 
 local function get_settings(device)
   local prefs = device.preferences or {}
@@ -116,17 +159,27 @@ local function poll_once(driver, device)
     if not reading then
       log.error(string.format("SolarEdge poll failed (%s:%d unit %d): %s",
         settings.ip, settings.port, settings.unit_id, tostring(read_err)))
+      if settings.ip == PLACEHOLDER_IP then
+        log.warn("SolarEdge: the IP Address setting is still the example " .. PLACEHOLDER_IP
+          .. "; enter your inverter's IP address in the device's Settings")
+      end
       record_poll_failure(device)
       return
     end
     record_poll_success(device)
 
     local temp_display = reading.temp_c and string.format("%.1fC", reading.temp_c) or "n/a"
-    log.info(string.format("SolarEdge reading: %.1fW, %.1fWh lifetime, %.1fV DC, %.1fW DC, %s, status=%s",
-      reading.power_w, reading.energy_wh, reading.dc_voltage, reading.dc_power_w, temp_display, reading.status_name))
+    log.info(string.format("SolarEdge reading: %sW, %sWh lifetime, %sV DC, %sW DC, %s, status=%s",
+      fmt("%.1f", reading.power_w), fmt("%.1f", reading.energy_wh), fmt("%.1f", reading.dc_voltage),
+      fmt("%.1f", reading.dc_power_w), temp_display, reading.status_name))
 
-    device:emit_event(capabilities.powerMeter.power({ value = reading.power_w, unit = "W" }))
-    device:emit_event(capabilities.energyMeter.energy({ value = reading.energy_wh / 1000.0, unit = "kWh" }))
+    if reading.power_w then
+      device:emit_event(capabilities.powerMeter.power({ value = reading.power_w, unit = "W" }))
+    end
+    local energy_wh = steady_total(device, "last_energy_wh", reading.energy_wh)
+    if energy_wh then
+      device:emit_event(capabilities.energyMeter.energy({ value = energy_wh / 1000.0, unit = "kWh" }))
+    end
     device:emit_event(STATUS_CAP.status({ value = reading.status_name }))
 
     -- Defensive bound matching the platform's own TemperatureValue constraint
@@ -148,24 +201,35 @@ local function poll_once(driver, device)
     local dc = device.profile.components.dc
     if dc then
       -- One "DC Input" row (Voltage, Current) under the power tile.
-      device:emit_component_event(dc, DC_INPUT_CAP.voltage({ value = round(reading.dc_voltage, 1), unit = "V" }))
+      if reading.dc_voltage then
+        device:emit_component_event(dc, DC_INPUT_CAP.voltage({ value = round(reading.dc_voltage, 1), unit = "V" }))
+      end
       if reading.dc_current_a then
         device:emit_component_event(dc, DC_INPUT_CAP.current({ value = round(reading.dc_current_a, 1), unit = "A" }))
       end
-      device:emit_component_event(dc, capabilities.powerMeter.power({ value = reading.dc_power_w, unit = "W" }))
+      if reading.dc_power_w then
+        device:emit_component_event(dc, capabilities.powerMeter.power({ value = reading.dc_power_w, unit = "W" }))
+      end
     end
 
     -- Grid meter is optional hardware — nil means this installation doesn't
     -- have one wired up (or it wasn't readable this cycle), not an error.
     local grid = device.profile.components.grid
     if grid and reading.grid_power_w then
-      log.info(string.format("SolarEdge grid meter: %.1fW net (%s), %.1fkWh exported, %.1fkWh imported",
+      log.info(string.format("SolarEdge grid meter (%s): %.1fW net (%s), %.1fkWh exported, %.1fkWh imported",
+        tostring(reading.meter_role or "role not reported"),
         reading.grid_power_w, reading.grid_power_w >= 0 and "exporting" or "importing",
         reading.grid_exported_wh / 1000.0, reading.grid_imported_wh / 1000.0))
       device:emit_component_event(grid, capabilities.powerMeter.power({ value = reading.grid_power_w, unit = "W" }))
       -- Whole kWh: lifetime totals in the thousands wrap their tile otherwise.
-      device:emit_component_event(grid, GRID_ENERGY_CAP.exported({ value = round(reading.grid_exported_wh / 1000.0), unit = "kWh" }))
-      device:emit_component_event(grid, GRID_ENERGY_CAP.imported({ value = round(reading.grid_imported_wh / 1000.0), unit = "kWh" }))
+      local exported = steady_total(device, "last_exported_wh", reading.grid_exported_wh)
+      local imported = steady_total(device, "last_imported_wh", reading.grid_imported_wh)
+      if exported then
+        device:emit_component_event(grid, GRID_ENERGY_CAP.exported({ value = round(exported / 1000.0), unit = "kWh" }))
+      end
+      if imported then
+        device:emit_component_event(grid, GRID_ENERGY_CAP.imported({ value = round(imported / 1000.0), unit = "kWh" }))
+      end
     end
 
     -- Per-phase grid power/voltage: only when the meter shows real voltage
@@ -173,7 +237,24 @@ local function poll_once(driver, device)
     -- the profile once, same pattern as the battery below.
     local ph = reading.grid_phases
     local one = reading.grid_phase_one
-    if not device:get_field(THREE_PHASE_FIELD) then
+    if device:get_field(THREE_PHASE_FIELD) then
+      -- Removed again after GONE_AFTER_SECONDS of meter reads without B/C
+      -- voltage (e.g. phantom voltage on unconnected inputs set it once).
+      if ph or not reading.meter_read then
+        device:set_field(PHASES_ABSENT_SINCE_FIELD, nil, { persist = true })
+      else
+        local since = device:get_field(PHASES_ABSENT_SINCE_FIELD)
+        if not since then
+          device:set_field(PHASES_ABSENT_SINCE_FIELD, os.time(), { persist = true })
+        elseif os.time() - since >= GONE_AFTER_SECONDS then
+          device:set_field(THREE_PHASE_FIELD, nil, { persist = true })
+          device:set_field(PHASES_ABSENT_SINCE_FIELD, nil, { persist = true })
+          log.info("SolarEdge: no voltage on phases B and C for 24 h, back to single phase (profile "
+            .. target_profile(device) .. ")")
+          apply_profile(device, target_profile(device))
+        end
+      end
+    else
       local seen = ph and (device:get_field(PHASES_SEEN_FIELD) or 0) + 1 or 0
       device:set_field(PHASES_SEEN_FIELD, seen)
       if seen < PHASES_CONFIRM_POLLS then
@@ -185,26 +266,40 @@ local function poll_once(driver, device)
     end
     if not ph and one and grid and device:supports_capability(PHASE_CAPS[1], "grid") then
       -- Single phase: the one row shows L1's voltage and current too.
-      device:emit_component_event(grid, PHASE_CAPS[1].power({ value = round(one.power), unit = "W" }))
+      if one.power then
+        device:emit_component_event(grid, PHASE_CAPS[1].power({ value = round(one.power), unit = "W" }))
+      end
       device:emit_component_event(grid, PHASE_CAPS[1].voltage({ value = round(one.voltage, 1), unit = "V" }))
-      device:emit_component_event(grid, PHASE_CAPS[1].current({ value = round(one.current, 1), unit = "A" }))
+      if one.current then
+        device:emit_component_event(grid, PHASE_CAPS[1].current({ value = round(one.current, 1), unit = "A" }))
+      end
     end
     if ph then
       if not device:get_field(THREE_PHASE_FIELD) then
         device:set_field(THREE_PHASE_FIELD, true, { persist = true })
         log.info("SolarEdge: three-phase grid meter detected, switching to profile " .. target_profile(device))
-        device:try_update_metadata({ profile = target_profile(device) })
+        apply_profile(device, target_profile(device))
       end
-      log.info(string.format("SolarEdge grid phases: L1 %.0fW %.1fV %.1fA, L2 %.0fW %.1fV %.1fA, L3 %.0fW %.1fV %.1fA",
-        ph.power[1], ph.voltage[1], ph.current[1], ph.power[2], ph.voltage[2], ph.current[2],
-        ph.power[3], ph.voltage[3], ph.current[3]))
+      local parts = {}
+      for i = 1, 3 do
+        parts[i] = string.format("L%d %sW %sV %sA", i, fmt("%.0f", ph.power[i]), fmt("%.1f", ph.voltage[i]), fmt("%.1f", ph.current[i]))
+      end
+      log.info("SolarEdge grid phases: " .. table.concat(parts, ", "))
       local gc = device.profile.components.grid
-      if gc and device:supports_capability(PHASE_CAPS[1], "grid") then
+      if gc then
         for i, cap in ipairs(PHASE_CAPS) do
-          -- Whole watts so "826 W" fits its cell without wrapping.
-          device:emit_component_event(gc, cap.power({ value = round(ph.power[i]), unit = "W" }))
-          device:emit_component_event(gc, cap.voltage({ value = round(ph.voltage[i], 1), unit = "V" }))
-          device:emit_component_event(gc, cap.current({ value = round(ph.current[i], 1), unit = "A" }))
+          -- Each row checked on its own: right after the switch the old
+          -- single-phase profile has only L1.
+          if device:supports_capability(cap, "grid") then
+            -- Whole watts so "826 W" fits its cell without wrapping.
+            if ph.power[i] then
+              device:emit_component_event(gc, cap.power({ value = round(ph.power[i]), unit = "W" }))
+            end
+            device:emit_component_event(gc, cap.voltage({ value = round(ph.voltage[i], 1), unit = "V" }))
+            if ph.current[i] then
+              device:emit_component_event(gc, cap.current({ value = round(ph.current[i], 1), unit = "A" }))
+            end
+          end
         end
       end
     end
@@ -212,12 +307,12 @@ local function poll_once(driver, device)
     -- Battery (StorEdge / hybrid) is optional hardware, read-only. The
     -- battery section (and the header battery icon) appears only after a
     -- battery has been read on BATTERY_CONFIRM_POLLS polls in a row, and
-    -- is removed again after BATTERY_GONE_POLLS polls in a row without
-    -- one. A single garbled read after a driver update once added it to a
+    -- is removed again after GONE_AFTER_SECONDS of clean "no battery"
+    -- reads (failed reads don't count). A single garbled read after a driver update once added it to a
     -- battery-less inverter for good (2026-10-10).
     local batt = reading.battery
     if batt then
-      device:set_field(BATTERY_MISSING_FIELD, 0)
+      device:set_field(BATTERY_ABSENT_SINCE_FIELD, nil, { persist = true })
       if not device:get_field(HAS_BATTERY_FIELD) then
         local seen = (device:get_field(BATTERY_SEEN_FIELD) or 0) + 1
         device:set_field(BATTERY_SEEN_FIELD, seen)
@@ -225,7 +320,7 @@ local function poll_once(driver, device)
           device:set_field(HAS_BATTERY_FIELD, true, { persist = true })
           log.info(string.format("SolarEdge: battery confirmed (rated %.0f Wh, %d polls), switching to profile %s",
             batt.rated_energy_wh, seen, target_profile(device)))
-          device:try_update_metadata({ profile = target_profile(device) })
+          apply_profile(device, target_profile(device))
         else
           log.info(string.format("SolarEdge: battery read (rated %.0f Wh), confirming %d/%d",
             batt.rated_energy_wh, seen, BATTERY_CONFIRM_POLLS))
@@ -270,15 +365,17 @@ local function poll_once(driver, device)
       end
     else
       device:set_field(BATTERY_SEEN_FIELD, 0)
-      if device:get_field(HAS_BATTERY_FIELD) then
-        local missing = (device:get_field(BATTERY_MISSING_FIELD) or 0) + 1
-        device:set_field(BATTERY_MISSING_FIELD, missing)
-        if missing >= BATTERY_GONE_POLLS then
+      -- Only clean "no battery" reads count; a failed read says nothing.
+      if device:get_field(HAS_BATTERY_FIELD) and reading.battery_state == "absent" then
+        local since = device:get_field(BATTERY_ABSENT_SINCE_FIELD)
+        if not since then
+          device:set_field(BATTERY_ABSENT_SINCE_FIELD, os.time(), { persist = true })
+        elseif os.time() - since >= GONE_AFTER_SECONDS then
           device:set_field(HAS_BATTERY_FIELD, nil, { persist = true })
-          device:set_field(BATTERY_MISSING_FIELD, 0)
-          log.info(string.format("SolarEdge: no battery for %d polls, removing the battery section (profile %s)",
-            missing, target_profile(device)))
-          device:try_update_metadata({ profile = target_profile(device) })
+          device:set_field(BATTERY_ABSENT_SINCE_FIELD, nil, { persist = true })
+          log.info("SolarEdge: no battery for 24 h, removing the battery section (profile "
+            .. target_profile(device) .. ")")
+          apply_profile(device, target_profile(device))
         end
       end
     end
@@ -327,10 +424,9 @@ local function device_init(driver, device)
   -- same-named profile's capability list changes on a later repackage.
   -- (device.profile.id is a UUID, so it can't be compared to these names.)
   local target = target_profile(device)
-  if device:get_field(APPLIED_PROFILE_FIELD) ~= target then
+  if device:get_field(APPLIED_PROFILE_FIELD) ~= target or not profile_matches(device) then
     log.info("SolarEdge applying profile " .. target)
-    device:try_update_metadata({ profile = target })
-    device:set_field(APPLIED_PROFILE_FIELD, target, { persist = true })
+    apply_profile(device, target)
   end
   start_polling(driver, device)
 end
@@ -343,7 +439,23 @@ end
 --- Fires when the user changes device settings (IP, port, unit ID, poll
 --- interval) in the SmartThings app. This is how the real IP actually gets
 --- into the driver, since discovery.lua creates the device without one.
+--- Also fires on the driver's own profile switches and on renames: polling
+--- restarts only when a connection setting changed (an extra poll right
+--- after another one contends for the inverter's single Modbus connection).
 local function info_changed(driver, device, event, args)
+  local old = args and args.old_st_store and args.old_st_store.preferences
+  local new = device.preferences or {}
+  if old then
+    local changed = false
+    for _, key in ipairs({ "ipAddress", "modbusPort", "unitId", "pollInterval" }) do
+      if old[key] ~= new[key] then
+        changed = true
+      end
+    end
+    if not changed then
+      return
+    end
+  end
   log.info("SolarEdge device preferences changed, restarting polling")
   start_polling(driver, device)
 end

@@ -191,7 +191,14 @@ function Discovery.discovery_handler(driver, opts, cons)
         end
       end
     else
-      known = existing[dni] or (m.mac and existing_macs[m.mac]) or existing_ips[m.ip]
+      -- By address only if that device isn't another module's (by MAC): after
+      -- a power cut a new module can get an address an existing one had.
+      local by_ip = existing_ips[m.ip]
+      local by_ip_mac = by_ip and by_ip.get_field and by_ip:get_field("mac")
+      if by_ip_mac and m.mac and by_ip_mac ~= m.mac then
+        by_ip = nil
+      end
+      known = existing[dni] or (m.mac and existing_macs[m.mac]) or by_ip
       -- Added while locked, under its name, and its address not known yet.
       local by_host = m.host and existing[HOST_PREFIX .. m.host]
       if not known and by_host and not by_host:get_field("ip") and not by_host:get_field("mac") then

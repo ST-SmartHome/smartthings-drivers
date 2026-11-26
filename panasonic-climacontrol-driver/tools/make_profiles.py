@@ -19,16 +19,22 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROFILES = os.path.join(HERE, "profiles")
 TEMPLATE = os.path.join(PROFILES, "climacontrol-panasonic.yml")
 
-# Components each "Unit features" choice leaves out; "basic" also drops the
-# left/right louvre (main component's horizontalVane).
-DROP = {
-    "all": [],
-    "nanoex": ["econavi", "milddry"],
-    "econavi": ["nanoex", "milddry"],
-    "basic": ["econavi", "nanoex", "milddry"],
-    # Not a setting: Basic without Eco, used when the unit rejects Eco.
-    "minimal": ["econavi", "nanoex", "milddry", "eco"],
-}
+# What each feature set's profile leaves out is read from HIDES in
+# src/init.lua, the single definition the driver also uses. "widevane" there
+# means the main component's left/right louvre (horizontalVane); the rest are
+# whole components. "minimal" is not a setting: Basic without Eco, used when
+# the unit rejects Eco.
+def read_hides():
+    src = open(os.path.join(HERE, "src", "init.lua")).read()
+    block = re.search(r"(?m)^local HIDES = \{\n(.*?)\n\}", src, re.S).group(1)
+    hides = {}
+    for name, body in re.findall(r"(\w+) = \{([^}]*)\}", block):
+        hides[name] = frozenset(re.findall(r"(\w+) = true", body))
+    return hides
+
+
+HIDES = read_hides()
+DROP = {name: sorted(h - {"widevane"}) for name, h in HIDES.items()}
 
 # Sensor batteries are a tile in their own section (the standard battery
 # capability would be lifted to the single icon at the top of the page).
@@ -79,10 +85,7 @@ CODE = {"eco": "e", "econavi": "v", "nanoex": "n", "milddry": "d", "widevane": "
 
 
 def hidden_of(features):
-    h = set(DROP[features])
-    if features in ("basic", "minimal"):
-        h.add("widevane")
-    return frozenset(h)
+    return HIDES[features]
 
 
 NAMED = {hidden_of(f): f for f in DROP}
