@@ -91,6 +91,9 @@ function Client:call(method, path, body)
       end
     elseif code ~= 200 then
       return nil, method .. " " .. path .. ": HTTP " .. tostring(code) .. " " .. tostring(data.message)
+    elseif method ~= "GET" and type(data.statusCode) == "number" and data.statusCode ~= 0 then
+      -- RainMachine refuses a command with HTTP 200 and a non-zero statusCode.
+      return nil, method .. " " .. path .. ": refused (statusCode " .. tostring(data.statusCode) .. ") " .. tostring(data.message)
     else
       return data
     end

@@ -504,41 +504,76 @@ end
 --- rain recorded today. nil when no enabled source reports observations.
 ---
 --- Hourly rain is either the amount in that hour or, as the Bureau of
---- Meteorology reports it, a running total since 9 am (the same figure
---- repeats while it's dry). A total is recognised by a positive value
---- repeating from one hour to the next, and then its latest value is the
---- rain so far; otherwise the hours are added up.
-local function rain_so_far(by_hour)
+--- Meteorology reports it, a running total since 9 am that only goes up and
+--- resets at 9 am. What a source is, is learned from its own rows and
+--- remembered per source (persisted field below):
+---   * a drop at any hour other than 9 am can only be per-hour amounts;
+---   * otherwise a positive value repeating hour to hour, or a drop at 9 am,
+---     means a running total.
+--- Until a source has shown either, its hours are added up (the old rule).
+local RAIN_KIND_FIELD = "rain_kind"
+
+local function sorted_hours(by_hour)
   local hours = {}
   for hour in pairs(by_hour) do
     table.insert(hours, hour)
   end
   table.sort(hours)
-  local running = false
-  for i = 2, #hours do
-    local a, b = by_hour[hours[i - 1]], by_hour[hours[i]]
-    if a > 0 and a == b then
-      running = true
-      break
-    end
-  end
-  if running then
-    return by_hour[hours[#hours]]
-  end
-  local sum = 0
-  for _, hour in ipairs(hours) do
-    sum = sum + by_hour[hour]
-  end
-  return sum
+  return hours
 end
 
-local function latest_observation(client, today, now_text)
+--- "hourly", "running" or nil (no evidence yet) from one day's rows.
+local function rain_kind_of(by_hour)
+  local hours = sorted_hours(by_hour)
+  local running = nil
+  for i = 2, #hours do
+    local a, b = by_hour[hours[i - 1]], by_hour[hours[i]]
+    if b < a then
+      if tonumber(hours[i]:sub(12, 13)) ~= 9 then
+        return "hourly"
+      end
+      running = "running"
+    elseif b == a and a > 0 then
+      running = "running"
+    end
+  end
+  return running
+end
+
+--- Rain since midnight. A running total counts only what was added today:
+--- the value at midnight is yesterday's rain since 9 am, and after the 9 am
+--- reset the new figure is all new rain.
+local function rain_so_far(by_hour, kind)
+  local hours = sorted_hours(by_hour)
+  if #hours == 0 then
+    return 0
+  end
+  local total = 0
+  if kind ~= "running" then
+    for _, hour in ipairs(hours) do
+      total = total + by_hour[hour]
+    end
+    return total
+  end
+  -- A day whose rows start after the reset: the first figure is today's.
+  if (tonumber(hours[1]:sub(12, 13)) or 0) >= 9 then
+    total = by_hour[hours[1]]
+  end
+  for i = 2, #hours do
+    local a, b = by_hour[hours[i - 1]], by_hour[hours[i]]
+    total = total + (b >= a and (b - a) or b)
+  end
+  return total
+end
+
+local function latest_observation(device, client, today, now_text)
   local list = client:get("parser")
-  local best, best_rain
+  local kinds = device:get_field(RAIN_KIND_FIELD) or {}
+  local best, rain, rain_hour
   for _, parser in ipairs((list and list.parsers) or {}) do
     if parser.enabled and parser.hasHistorical then
       local data = client:get("parser/" .. parser.uid .. "/data/" .. today .. "/1")
-      local latest, by_hour = nil, {}
+      local latest, by_hour, last_rain_hour = nil, {}, nil
       for _, block in ipairs((data and data.parserData) or {}) do
         for _, day in ipairs(block.dailyValues or {}) do
           for _, h in ipairs(day.hourlyValues or {}) do
@@ -549,18 +584,33 @@ local function latest_observation(client, today, now_text)
               end
               if type(h.rain) == "number" and by_hour[hour] == nil then
                 by_hour[hour] = h.rain
+                if not last_rain_hour or hour > last_rain_hour then
+                  last_rain_hour = hour
+                end
               end
             end
           end
         end
       end
-      local rain = rain_so_far(by_hour)
+      local key = tostring(parser.uid)
+      local seen = rain_kind_of(by_hour)
+      if seen and kinds[key] ~= "hourly" and kinds[key] ~= seen then
+        kinds[key] = seen
+        device:set_field(RAIN_KIND_FIELD, kinds, { persist = true })
+        log.info("RainMachine weather source " .. tostring(parser.name or key) .. " reports rain as " ..
+          (seen == "running" and "a running total since 9 am" or "per-hour amounts"))
+      end
       if latest and (not best or latest.hour > best.hour) then
-        best, best_rain = latest, rain
+        best = latest
+      end
+      -- Rain from the source with the newest rain row, which needn't be the
+      -- one with the newest temperature.
+      if last_rain_hour and (not rain_hour or last_rain_hour > rain_hour) then
+        rain, rain_hour = rain_so_far(by_hour, kinds[key]), last_rain_hour
       end
     end
   end
-  return best, best_rain
+  return best, rain or 0
 end
 
 --- "☀️ 28°  79%RH  💨11 km/h  💦0 mm  @21:30" from an actual
@@ -671,18 +721,22 @@ local function update_forecast(device, client, force)
   if provision and provision.system then
     units_metric = provision.system.uiUnitsMetric ~= false
   end
+  -- Counted as done even when the mixer has no data, so it isn't fetched
+  -- again on every poll; the stats, history and zone setup below still run.
+  device:set_field(FORECAST_LAST_FIELD, os.time())
   local mix = client:get("mixer/" .. today .. "/2")
   local days = mix and mix.mixerDataByDate
-  if not days or not days[1] then
-    return
+  if days and days[1] then
+    local text = day_forecast("Today", days[1])
+    if days[2] then
+      local t = parse_date(days[2].day)
+      text = text .. "\n" .. day_forecast(t and os.date("!%a", t) or "Tomorrow", days[2])
+    end
+    device:emit_event(FORECAST_CAP.forecast(text))
+  else
+    days = nil
+    log.info("RainMachine weather mixer has no data for " .. today)
   end
-  local text = day_forecast("Today", days[1])
-  if days[2] then
-    local t = parse_date(days[2].day)
-    text = text .. "\n" .. day_forecast(t and os.date("!%a", t) or "Tomorrow", days[2])
-  end
-  device:set_field(FORECAST_LAST_FIELD, os.time())
-  device:emit_event(FORECAST_CAP.forecast(text))
   local stats = client:get("dailystats?days=7")
   if stats and stats.DailyStats then
     local pct = {}
@@ -730,10 +784,10 @@ local function update_forecast(device, client, force)
   if device:supports_capability_by_id(WEATHER_CAP.ID) then
     -- Actual readings when a source reports them, otherwise RainMachine's
     -- combined figure for the day.
-    local ok, obs, rain_today = pcall(latest_observation, client, today, tostring(now.appDate))
+    local ok, obs, rain_today = pcall(latest_observation, device, client, today, tostring(now.appDate))
     if ok and obs then
-      device:emit_event(WEATHER_CAP.weather(observed_weather(obs, rain_today, days[1])))
-    else
+      device:emit_event(WEATHER_CAP.weather(observed_weather(obs, rain_today, days and days[1])))
+    elseif days and days[1] then
       device:emit_event(WEATHER_CAP.weather(today_weather(days[1])))
     end
   end
@@ -889,6 +943,8 @@ local function apply_status(driver, device, zones, programs, restrictions, s, qu
   end
   local ctx = {
     queue = queue or {},
+    -- false when the queue read failed: an empty list then proves nothing.
+    queue_read = queue ~= nil,
     local_now = local_now(device),
     details = device:get_field(DETAILS_FIELD),
     pct_by_day = device:get_field(PCT_BY_DAY_FIELD),
@@ -932,7 +988,9 @@ local function apply_status(driver, device, zones, programs, restrictions, s, qu
     if e.zid and not skip then
       to_water[e.zid] = true
     end
-    if e.pid and active[e.pid] then
+    -- An entry without a zone (e.g. a pause or delay marker) is skipped: a
+    -- nil table key would stop the whole status update on every poll.
+    if e.pid and e.zid and active[e.pid] then
       program_seen[e.pid] = program_seen[e.pid] or {}
       if not skip then
         program_seen[e.pid][e.zid] = true
@@ -1047,7 +1105,7 @@ local function apply_status(driver, device, zones, programs, restrictions, s, qu
     pause = { value = value, ends_at = os.time() + secs, set_at = pause and pause.set_at or 0 }
     device:set_field(PAUSE_FIELD, pause, { persist = true })
   elseif pause and (os.time() >= pause.ends_at
-      or (watering and os.time() - (pause.set_at or 0) > 30)) then
+      or (watering and ctx.queue_read and os.time() - (pause.set_at or 0) > 30)) then
     -- Ended, or resumed elsewhere (watering with no pause entry; the first
     -- 30 s after pausing are skipped while RainMachine adds the entry).
     pause = nil
@@ -1061,7 +1119,9 @@ local function apply_status(driver, device, zones, programs, restrictions, s, qu
   end
   local stopped_at = device:get_field(STOPPED_AT_FIELD)
   if stopped_at then
-    if watering or os.time() - stopped_at > STOPPED_SHOW_SECONDS then
+    -- Watering still reported in the first 30 s is RainMachine winding
+    -- down after Stop All; after that it's a new run.
+    if (watering and os.time() - stopped_at > 30) or os.time() - stopped_at > STOPPED_SHOW_SECONDS then
       device:set_field(STOPPED_AT_FIELD, nil, { persist = true })
     elseif status == "Idle" then
       status = "Stopped by user"
