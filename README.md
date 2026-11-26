@@ -32,11 +32,11 @@ Each has its own `README.md` (technical details, setup).
   as its own device (for Alexa/Google), correct energy readings,
   adjustable reporting, and a per-outlet Auto Off Timer that runs on the
   plug itself.
-- **[EF00 Sensors ST-SmartHome](https://github.com/ST-SmartHome/smartthings-zigbee-edge-drivers/tree/main/deploy/ef00-sensors-st-smarthome)**
-  — 7-in-1 pool water quality meter (Tuya `TS0601` / `_TZE200_v1jqz5cy`):
-  pH and free chlorine limits shown and set as decimals (7.8 pH, 2.4 mg/L),
-  negative ORP limits, and readable labels.
+- **EF00 Sensors ST-SmartHome** (7-in-1 pool water quality meter) is
+  **retired**: its decimal pH and chlorine limits were merged into
+  [wonjj6768's EF00 Sensors driver](https://github.com/wonjj6768/smartthings-zigbee-edge-drivers),
+  so use that driver from his channel instead.
 
-Both live in a separate repository because they're forks of
+ZCL Switch ST-SmartHome lives in a separate repository because it's a fork of
 [wonjj6768's Zigbee Edge drivers](https://github.com/wonjj6768/smartthings-zigbee-edge-drivers),
 which keeps them in sync with upstream and lets fixes go back upstream.
